@@ -34,5 +34,7 @@ public/models/*.onnx
 
 # Python venv и выходные папки
 .venv
+__pycache__
+*.pyc
 separated
 separated_demucs
