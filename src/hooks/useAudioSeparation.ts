@@ -23,6 +23,7 @@ export interface UseAudioSeparationResult {
   usedFallback: boolean;
   separate: (file: File) => Promise<AudioStems | null>;
   loadStemsFromFiles: (files: File[]) => Promise<AudioStems | null>;
+  setStemsFromProject: (stems: AudioStems) => void;
   reset: () => void;
 }
 
@@ -405,6 +406,13 @@ export function useAudioSeparation(): UseAudioSeparationResult {
     []
   );
 
+  const setStemsFromProject = useCallback((stems: AudioStems) => {
+    setStems(stems);
+    setError(null);
+    setProgress(100);
+    setDownloadProgress(100);
+  }, []);
+
   const reset = useCallback(() => {
     setStems(null);
     setProgress(0);
@@ -424,6 +432,7 @@ export function useAudioSeparation(): UseAudioSeparationResult {
     usedFallback,
     separate,
     loadStemsFromFiles,
+    setStemsFromProject,
     reset,
   };
 }
