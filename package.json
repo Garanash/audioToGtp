@@ -29,6 +29,7 @@
     "howler": "^2.2.4",
     "midi-writer-js": "^1.7.5",
     "onnxruntime-web": "^1.21.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "vexflow": "^5.0.0"

@@ -18,6 +18,9 @@
   font-weight: 400;
   color: #E0E0E0;
   background-color: #0A0A0A;
+  --announcement-height: 0px;
+  --bg-header: transparent;
+  --header-border: rgba(255, 255, 255, 0.08);
 }
 
 body {

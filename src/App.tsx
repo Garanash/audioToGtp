@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useModelPreload } from './hooks/useModelPreload';
 import { motion } from 'framer-motion';
 import { Header } from './components/Header';
+import { CookieConsent } from './components/CookieConsent';
+import { TelegramQR } from './components/TelegramQR';
 import { SeparationTab } from './components/SeparationTab';
 import { ConversionTab } from './components/ConversionTab';
 import { NotationTab } from './components/NotationTab';
@@ -16,8 +18,10 @@ function App() {
   return (
     <div className="min-h-screen bg-[#0A0A0A] font-sans">
       <Header />
+      <CookieConsent />
+      <TelegramQR />
 
-      <main>
+      <main className="pt-20">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}

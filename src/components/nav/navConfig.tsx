@@ -18,6 +18,14 @@ import {
 } from './NavIcons';
 import type { MegaDropdownCard } from './MegaDropdown';
 
+const MADE_FOR_IMAGES = {
+  drums: 'https://avatars.mds.yandex.net/i?id=075d80a0690b9a4a05f3bedf9993567fd248faa0-9065868-images-thumbs&n=13',
+  guitar: 'https://avatars.mds.yandex.net/i?id=6ed036d0dcaed84ed35c14b261945c435cb78c59-13013698-images-thumbs&n=13',
+  vocals: 'https://avatars.mds.yandex.net/i?id=3c2b603a7595914bfc3002e1e0265f7516cc19ad-4079923-images-thumbs&n=13',
+  bass: 'https://avatars.mds.yandex.net/i?id=9a508597358ad834f48e361bcd97ed16f90f0db4-7043984-images-thumbs&n=13',
+  producers: 'https://avatars.mds.yandex.net/i?id=e7fb0f823312454e285127c1a9a8800fe87ed8bb-12569873-images-thumbs&n=13',
+};
+
 export const MADE_FOR_CARDS: MegaDropdownCard[] = [
   {
     id: 'drums',
@@ -27,6 +35,7 @@ export const MADE_FOR_CARDS: MegaDropdownCard[] = [
     ctaText: 'Разделить трек',
     icon: <IconDrums />,
     gradient: 'bg-gradient-to-br from-amber-500/20 to-orange-600/20',
+    imageUrl: MADE_FOR_IMAGES.drums,
   },
   {
     id: 'vocals',
@@ -36,6 +45,7 @@ export const MADE_FOR_CARDS: MegaDropdownCard[] = [
     ctaText: 'Получить минус',
     icon: <IconVocals />,
     gradient: 'bg-gradient-to-br from-rose-500/20 to-pink-600/20',
+    imageUrl: MADE_FOR_IMAGES.vocals,
   },
   {
     id: 'guitar',
@@ -45,6 +55,7 @@ export const MADE_FOR_CARDS: MegaDropdownCard[] = [
     ctaText: 'К нотам',
     icon: <IconGuitar />,
     gradient: 'bg-gradient-to-br from-emerald-500/20 to-teal-600/20',
+    imageUrl: MADE_FOR_IMAGES.guitar,
   },
   {
     id: 'bass',
@@ -54,6 +65,7 @@ export const MADE_FOR_CARDS: MegaDropdownCard[] = [
     ctaText: 'В MIDI',
     icon: <IconBass />,
     gradient: 'bg-gradient-to-br from-blue-500/20 to-indigo-600/20',
+    imageUrl: MADE_FOR_IMAGES.bass,
   },
   {
     id: 'producers',
@@ -63,6 +75,7 @@ export const MADE_FOR_CARDS: MegaDropdownCard[] = [
     ctaText: 'Разделить',
     icon: <IconProducer />,
     gradient: 'bg-gradient-to-br from-[#8A2BE2]/20 to-[#4B0082]/20',
+    imageUrl: MADE_FOR_IMAGES.producers,
   },
 ];
 

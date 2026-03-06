@@ -21,7 +21,7 @@ const MEGA_MENUS: { key: DropdownKey; label: string }[] = [
   { key: 'made-for', label: 'Сделано для' },
   { key: 'features', label: 'Возможности' },
   { key: 'platforms', label: 'Платформы' },
-  { key: 'media', label: 'Медиа' },
+  { key: 'media', label: 'Медиаматериалы' },
 ];
 
 function ChevronDown({ className }: { className?: string }) {
@@ -85,24 +85,25 @@ export function Header() {
   };
 
   return (
-    <motion.header
-      initial={{ opacity: 0, y: -20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="sticky top-0 z-40 border-b border-[#2A2A2A] bg-[#0A0A0A]/95 backdrop-blur-md"
+    <header
+      className="fixed left-0 top-[var(--announcement-height)] z-50 w-full border-b transition-colors"
+      style={{
+        background: 'var(--bg-header)',
+        borderColor: 'var(--header-border)',
+      }}
     >
-      <div className="mx-auto max-w-7xl px-4 py-3 md:px-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <a href="#" className="flex items-center gap-2 transition-opacity hover:opacity-90">
-            <h1 className="bg-gradient-to-r from-white to-gray-500 bg-clip-text text-xl font-extrabold tracking-tight text-transparent md:text-2xl">
-              Audio to GTP
-            </h1>
-            <span className="rounded-full bg-gradient-to-r from-[#8A2BE2] to-[#4B0082] px-3 py-1 text-xs font-semibold text-white shadow-lg shadow-[#8A2BE2]/20">
-              Converter
-            </span>
-          </a>
+      <div className="mx-auto flex h-20 max-w-[1400px] items-center justify-between gap-10 px-4 md:px-6 lg:px-8">
+        <a href="#" className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-90">
+          <h1 className="bg-gradient-to-r from-white to-gray-500 bg-clip-text text-xl font-extrabold tracking-tight text-transparent md:text-2xl">
+            Audio to GTP
+          </h1>
+          <span className="rounded-full bg-gradient-to-r from-[#8A2BE2] to-[#4B0082] px-3 py-1 text-xs font-semibold text-white shadow-lg shadow-[#8A2BE2]/20">
+            Converter
+          </span>
+        </a>
 
-          <nav className="flex flex-wrap items-center gap-1 md:gap-0.5" ref={dropdownRef}>
-            {MEGA_MENUS.map(({ key, label }) => (
+        <nav className="flex shrink-0 items-center gap-0.5" ref={dropdownRef}>
+          {MEGA_MENUS.map(({ key, label }) => (
               <MegaDropdown
                 key={key}
                 label={label}
@@ -124,17 +125,17 @@ export function Header() {
                   />
                 </button>
               </MegaDropdown>
-            ))}
-            <a
-              href="#guides"
-              className="rounded-lg px-3 py-2.5 text-sm font-medium text-[#A0A0A0] transition-all duration-200 hover:bg-[#1A1A1A] hover:text-[#E0E0E0]"
-            >
-              Руководства
-            </a>
-          </nav>
+          ))}
+          <a
+            href="#guides"
+            className="rounded-lg px-3 py-2.5 text-sm font-medium text-[#A0A0A0] transition-all duration-200 hover:bg-[#1A1A1A] hover:text-[#E0E0E0]"
+          >
+            Руководства
+          </a>
+        </nav>
 
-          <div className="flex items-center gap-2">
-            {!isLoading &&
+        <div className="flex shrink-0 items-center gap-2">
+          {!isLoading &&
               (user ? (
                 <div className="relative flex items-center gap-3" ref={dropdownRef}>
                   <button
@@ -217,18 +218,14 @@ export function Header() {
                     Регистрация
                   </button>
                 </>
-              ))}
-          </div>
+          ))}
         </div>
-        <p className="mt-1.5 hidden text-sm text-[#A0A0A0] md:block">
-          Разделяй любой трек на дорожки и конвертируй в MIDI
-        </p>
       </div>
       <AuthModal
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
         mode={authMode}
       />
-    </motion.header>
+    </header>
   );
 }
