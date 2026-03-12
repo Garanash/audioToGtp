@@ -10,10 +10,12 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,7 +40,13 @@ try:
     from config import (
         CACHE_KEY_PREFIX,
         CACHE_TTL_SECONDS,
+        GTP_INPUT_KEY_PREFIX,
+        GTP_RESULT_KEY_PREFIX,
+        GTP_STATUS_KEY_PREFIX,
         INPUT_KEY_PREFIX,
+        MIDI_INPUT_KEY_PREFIX,
+        MIDI_RESULT_KEY_PREFIX,
+        MIDI_STATUS_KEY_PREFIX,
         RESULT_KEY_PREFIX,
         STATUS_KEY_PREFIX,
         REDIS_URL,
@@ -106,6 +114,11 @@ def _init_db():
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS tab_stats (
+            path TEXT PRIMARY KEY,
+            downloads INTEGER NOT NULL DEFAULT 0,
+            rating REAL NOT NULL DEFAULT 4.0
+        );
     """)
     conn.commit()
     conn.close()
@@ -138,6 +151,16 @@ def _redis_conn():
     if not REDIS_AVAILABLE:
         return None
     return redis.from_url(REDIS_URL, decode_responses=False)
+
+
+def _job_keys(job_type: str, task_id: str) -> tuple[str, str]:
+    if job_type == "separate":
+        return f"{INPUT_KEY_PREFIX}{task_id}", f"{STATUS_KEY_PREFIX}{task_id}"
+    if job_type == "midi":
+        return f"{MIDI_INPUT_KEY_PREFIX}{task_id}", f"{MIDI_STATUS_KEY_PREFIX}{task_id}"
+    if job_type == "gtp":
+        return f"{GTP_INPUT_KEY_PREFIX}{task_id}", f"{GTP_STATUS_KEY_PREFIX}{task_id}"
+    raise HTTPException(400, "Неверный тип задачи. Используйте: separate | midi | gtp")
 
 
 def _run_demucs_sync(in_file: Path, out_dir: Path) -> tuple[str | None, list[str]]:
@@ -243,17 +266,93 @@ except Exception:
     pass
 
 
+def _normalize_bpm_to_musical_range(bpm: float) -> float:
+    """Нормализует BPM в типичный музыкальный диапазон, убирая half/double-time."""
+    value = float(bpm)
+    while value > 140:
+        value /= 2.0
+    while value < 70:
+        value *= 2.0
+    return max(40.0, min(220.0, value))
+
+
+def _onset_tempo_score(onset_env, bpm: float, hop_length: int, sr: int) -> float:
+    """Считает согласованность BPM с onset-envelope через автокорреляцию и гармоники."""
+    import numpy as np
+
+    if bpm <= 0:
+        return 0.0
+    period_sec = 60.0 / bpm
+    lag = int(round((period_sec * sr) / hop_length))
+    if lag <= 0 or lag >= len(onset_env):
+        return 0.0
+
+    def corr(l: int) -> float:
+        if l <= 0 or l >= len(onset_env):
+            return 0.0
+        a = onset_env[l:]
+        b = onset_env[:-l]
+        if a.size == 0 or b.size == 0:
+            return 0.0
+        return float(np.dot(a, b))
+
+    base = corr(lag)
+    half = corr(max(1, lag // 2))
+    double = corr(min(len(onset_env) - 1, lag * 2))
+    return base + half * 0.35 + double * 0.45
+
+
+def _detect_bpm_librosa(path: Path) -> float | None:
+    """Локальный robust BPM-детектор на librosa."""
+    import numpy as np
+    import librosa
+
+    y, sr = librosa.load(str(path), sr=22050, mono=True)
+    if y is None or len(y) < sr * 5:
+        return None
+
+    hop_length = 512
+    onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+    if onset_env is None or len(onset_env) < 8:
+        return None
+
+    tempo_dynamic = librosa.feature.tempo(
+        onset_envelope=onset_env,
+        sr=sr,
+        hop_length=hop_length,
+        aggregate=None,
+    )
+    if tempo_dynamic is None or len(tempo_dynamic) == 0:
+        return None
+
+    median_tempo = float(np.median(tempo_dynamic))
+    mean_tempo = float(np.mean(tempo_dynamic))
+    candidates = {
+        _normalize_bpm_to_musical_range(median_tempo),
+        _normalize_bpm_to_musical_range(mean_tempo),
+    }
+    # Добавим близкие half/double варианты кандидатов для устойчивости.
+    expanded = set(candidates)
+    for c in list(candidates):
+        expanded.add(_normalize_bpm_to_musical_range(c * 2.0))
+        expanded.add(_normalize_bpm_to_musical_range(c / 2.0))
+
+    best_bpm = None
+    best_score = -1.0
+    for c in expanded:
+        score = _onset_tempo_score(onset_env, c, hop_length, sr)
+        if score > best_score:
+            best_score = score
+            best_bpm = c
+    return best_bpm
+
+
 @app.post("/detect-bpm")
 async def detect_bpm(file: UploadFile = File(...)):
     """
     Определяет BPM и тональность из аудио (bpm-detector).
     Возвращает { bpm: float, key: str | null }. При недоступности библиотеки — 503.
     """
-    if not _BPM_DETECTOR_AVAILABLE:
-        raise HTTPException(
-            status_code=503,
-            detail="bpm-detector не установлен. Выполните: pip install 'bpm-detector @ git+https://github.com/libraz/bpm-detector.git'",
-        )
     if not file.filename or not any(
         file.filename.lower().endswith(ext) for ext in (".wav", ".mp3", ".flac", ".m4a", ".ogg")
     ):
@@ -264,14 +363,40 @@ async def detect_bpm(file: UploadFile = File(...)):
     try:
         path = workdir / f"audio{ext}"
         path.write_bytes(content)
-        analyzer = AudioAnalyzer()
-        results = analyzer.analyze_file(str(path), detect_key=True, comprehensive=False)
-        basic = results.get("basic_info") or {}
-        bpm = float(basic.get("bpm", 120))
-        key = basic.get("key")
-        if key is not None:
-            key = str(key).strip() or None
-        return {"bpm": round(bpm, 1), "key": key}
+        key = None
+        bpm_candidates: list[float] = []
+
+        if _BPM_DETECTOR_AVAILABLE:
+            try:
+                analyzer = AudioAnalyzer()
+                results = analyzer.analyze_file(str(path), detect_key=True, comprehensive=False)
+                basic = results.get("basic_info") or {}
+                analyzer_bpm = float(basic.get("bpm", 120))
+                bpm_candidates.append(_normalize_bpm_to_musical_range(analyzer_bpm))
+                key = basic.get("key")
+                if key is not None:
+                    key = str(key).strip() or None
+            except Exception:
+                # Продолжаем с librosa, даже если внешний детектор ошибся.
+                pass
+
+        librosa_bpm = _detect_bpm_librosa(path)
+        if librosa_bpm:
+            bpm_candidates.append(_normalize_bpm_to_musical_range(librosa_bpm))
+
+        if not bpm_candidates:
+            raise HTTPException(503, "Не удалось определить BPM")
+
+        # Финальный выбор: при расхождении отдаём librosa, как более устойчивый к double-time.
+        bpm = bpm_candidates[-1]
+        if len(bpm_candidates) > 1:
+            first = bpm_candidates[0]
+            second = bpm_candidates[-1]
+            bpm = second if abs(second - first) > 6 else (first + second) / 2.0
+
+        return {"bpm": round(float(bpm), 1), "key": key}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Ошибка анализа: {str(e)[:200]}")
     finally:
@@ -281,8 +406,29 @@ async def detect_bpm(file: UploadFile = File(...)):
 if _GTP_ROUTES_AVAILABLE:
 
     @app.post("/convert-to-gtp")
-    async def convert_to_gtp(body: ConvertRequest):
-        """Конвертирует MIDI-дорожки в .gp5. Тело: { tracks, tempo }. Ответ: файл .gp5."""
+    async def convert_to_gtp(
+        body: ConvertRequest,
+        sync: bool = Query(False, description="Принудительно синхронно (без очереди)"),
+    ):
+        """Конвертирует MIDI-дорожки в .gp5. Тело: { tracks, tempo, baseTempo? }. Ответ: файл .gp5."""
+        r = None
+        try:
+            r = _redis_conn()
+        except Exception:
+            r = None
+        use_async = bool(USE_CELERY and REDIS_AVAILABLE and r and not sync)
+        if use_async:
+            try:
+                task_id = str(uuid.uuid4())
+                input_key = f"{GTP_INPUT_KEY_PREFIX}{task_id}"
+                status_key = f"{GTP_STATUS_KEY_PREFIX}{task_id}"
+                r.setex(input_key, 3600, body.model_dump_json().encode("utf-8"))
+                r.setex(status_key, 3600, b"pending")
+                from tasks import run_gtp_conversion
+                run_gtp_conversion.delay(task_id)
+                return {"taskId": task_id, "status": "pending"}
+            except Exception:
+                pass
         try:
             content = convert_to_gp5(body)
         except GTPUnavailableError as e:
@@ -297,6 +443,43 @@ if _GTP_ROUTES_AVAILABLE:
                 "Cache-Control": "no-store",
             },
         )
+
+
+@app.get("/convert-to-gtp/status/{task_id}")
+def convert_to_gtp_status(task_id: str):
+    """Статус задачи GTP: pending | processing | completed | failed."""
+    if not REDIS_AVAILABLE:
+        raise HTTPException(503, "Redis недоступен")
+    r = _redis_conn()
+    status_key = f"{GTP_STATUS_KEY_PREFIX}{task_id}"
+    raw = r.get(status_key)
+    if not raw:
+        return {"taskId": task_id, "status": "unknown"}
+    return {"taskId": task_id, "status": raw.decode("utf-8")}
+
+
+@app.get("/convert-to-gtp/result/{task_id}")
+def convert_to_gtp_result(task_id: str):
+    """Результат задачи GTP: бинарный gp5 или 202 если ещё не готов."""
+    if not REDIS_AVAILABLE:
+        raise HTTPException(503, "Redis недоступен")
+    r = _redis_conn()
+    result_key = f"{GTP_RESULT_KEY_PREFIX}{task_id}"
+    raw = r.get(result_key)
+    if not raw:
+        status_key = f"{GTP_STATUS_KEY_PREFIX}{task_id}"
+        st = r.get(status_key)
+        if st and st.decode("utf-8") == "failed":
+            raise HTTPException(500, "Задача завершилась с ошибкой")
+        raise HTTPException(202, "Результат ещё не готов")
+    return Response(
+        content=raw,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": 'attachment; filename="converted.gp5"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @app.post("/separate")
@@ -341,7 +524,12 @@ async def separate(
             task_id = str(uuid.uuid4())
             input_key = f"{INPUT_KEY_PREFIX}{task_id}"
             status_key = f"{STATUS_KEY_PREFIX}{task_id}"
-            r.setex(input_key, 3600, content)
+            payload = {
+                "contentB64": base64.b64encode(content).decode("ascii"),
+                "ext": ext,
+                "contentHash": content_hash,
+            }
+            r.setex(input_key, 3600, json.dumps(payload).encode("utf-8"))
             r.setex(status_key, 3600, b"pending")
 
             from tasks import run_separation
@@ -415,7 +603,7 @@ except Exception:
 async def convert_to_midi(body: dict):
     """
     Конвертация аудио (WAV в base64) в MIDI-дорожки через sound-to-midi.
-    Тело: { "stems": { "vocals": "<base64>", "other": "<base64>", ... }, "multiTrack": true }.
+    Тело: { "stems": { "vocals": "<base64>", "other": "<base64>", ... }, "multiTrack": true, "accuracyMode": "balanced|max|ultra|extreme" }.
     Ответ: { "tracks": [ { "instrument": "vocals", "notes": [ { "pitch", "startTime", "endTime", "velocity" } ] } ] }.
     """
     if not _MIDI_CONVERT_AVAILABLE:
@@ -423,8 +611,28 @@ async def convert_to_midi(body: dict):
             status_code=503,
             detail="sound-to-midi не установлен. Выполните: pip install sound-to-midi librosa",
         )
+    r = None
+    try:
+        r = _redis_conn()
+    except Exception:
+        r = None
+    use_async = bool(USE_CELERY and REDIS_AVAILABLE and r)
+    if use_async:
+        try:
+            task_id = str(uuid.uuid4())
+            input_key = f"{MIDI_INPUT_KEY_PREFIX}{task_id}"
+            status_key = f"{MIDI_STATUS_KEY_PREFIX}{task_id}"
+            r.setex(input_key, 3600, json.dumps(body).encode("utf-8"))
+            r.setex(status_key, 3600, b"pending")
+            from tasks import run_midi_conversion
+            run_midi_conversion.delay(task_id)
+            return {"taskId": task_id, "status": "pending"}
+        except Exception:
+            pass
+
     stems_b64 = body.get("stems") or {}
     multi_track = body.get("multiTrack", True)
+    accuracy_mode = body.get("accuracyMode", "balanced")
     if not isinstance(stems_b64, dict) or not stems_b64:
         raise HTTPException(400, "Нужно передать stems: объект с ключами (vocals, drums, ...) и base64 WAV.")
     stems_bytes = {}
@@ -438,7 +646,11 @@ async def convert_to_midi(body: dict):
     if not stems_bytes:
         raise HTTPException(400, "Не удалось декодировать ни один stem.")
     try:
-        tracks = convert_audio_to_midi_tracks(stems_bytes, multi_track=multi_track)
+        tracks = convert_audio_to_midi_tracks(
+            stems_bytes,
+            multi_track=multi_track,
+            accuracy_mode=accuracy_mode,
+        )
     except RuntimeError as e:
         raise HTTPException(503, str(e))
     except Exception as e:
@@ -446,9 +658,245 @@ async def convert_to_midi(body: dict):
     return {"tracks": tracks}
 
 
+@app.get("/convert-to-midi/status/{task_id}")
+def convert_to_midi_status(task_id: str):
+    """Статус задачи MIDI: pending | processing | completed | failed."""
+    if not REDIS_AVAILABLE:
+        raise HTTPException(503, "Redis недоступен")
+    r = _redis_conn()
+    status_key = f"{MIDI_STATUS_KEY_PREFIX}{task_id}"
+    raw = r.get(status_key)
+    if not raw:
+        return {"taskId": task_id, "status": "unknown"}
+    return {"taskId": task_id, "status": raw.decode("utf-8")}
+
+
+@app.get("/convert-to-midi/result/{task_id}")
+def convert_to_midi_result(task_id: str):
+    """Результат задачи MIDI: JSON с tracks или 202."""
+    if not REDIS_AVAILABLE:
+        raise HTTPException(503, "Redis недоступен")
+    r = _redis_conn()
+    result_key = f"{MIDI_RESULT_KEY_PREFIX}{task_id}"
+    raw = r.get(result_key)
+    if not raw:
+        status_key = f"{MIDI_STATUS_KEY_PREFIX}{task_id}"
+        st = r.get(status_key)
+        if st and st.decode("utf-8") == "failed":
+            raise HTTPException(500, "Задача завершилась с ошибкой")
+        raise HTTPException(202, "Результат ещё не готов")
+    return json.loads(raw.decode("utf-8"))
+
+
+@app.get("/jobs/{job_type}/{task_id}")
+def get_job_state(job_type: str, task_id: str):
+    """Единый статус задачи для UI Job Center."""
+    if not REDIS_AVAILABLE:
+        raise HTTPException(503, "Redis недоступен")
+    r = _redis_conn()
+    _, status_key = _job_keys(job_type, task_id)
+    raw = r.get(status_key)
+    status = raw.decode("utf-8") if raw else "unknown"
+    return {"taskId": task_id, "type": job_type, "status": status}
+
+
+@app.post("/jobs/{job_type}/{task_id}/cancel")
+def cancel_job(job_type: str, task_id: str):
+    """Отмена задачи (best-effort): revoke в Celery + статус cancelled."""
+    if not REDIS_AVAILABLE:
+        raise HTTPException(503, "Redis недоступен")
+    r = _redis_conn()
+    _, status_key = _job_keys(job_type, task_id)
+    current = r.get(status_key)
+    if current and current.decode("utf-8") in {"completed", "failed", "cancelled"}:
+        return {"taskId": task_id, "type": job_type, "status": current.decode("utf-8")}
+
+    try:
+        try:
+            from tasks import celery_app as _celery_app
+        except Exception:
+            from celery_app import celery_app as _celery_app
+        _celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+    except Exception:
+        pass
+
+    r.setex(status_key, 3600, b"cancelled")
+    return {"taskId": task_id, "type": job_type, "status": "cancelled"}
+
+
+@app.post("/jobs/{job_type}/{task_id}/retry")
+def retry_job(job_type: str, task_id: str):
+    """Повторный запуск задачи по сохраненному input:{task_id}."""
+    if not REDIS_AVAILABLE:
+        raise HTTPException(503, "Redis недоступен")
+    r = _redis_conn()
+    input_key, status_key = _job_keys(job_type, task_id)
+    payload = r.get(input_key)
+    if not payload:
+        raise HTTPException(404, "Не удалось повторить: исходные данные задачи истекли")
+
+    new_task_id = str(uuid.uuid4())
+    new_input_key, new_status_key = _job_keys(job_type, new_task_id)
+    r.setex(new_input_key, 3600, payload)
+    r.setex(new_status_key, 3600, b"pending")
+
+    if job_type == "separate":
+        from tasks import run_separation
+        run_separation.delay(new_task_id, None, ".wav")
+    elif job_type == "midi":
+        from tasks import run_midi_conversion
+        run_midi_conversion.delay(new_task_id)
+    elif job_type == "gtp":
+        from tasks import run_gtp_conversion
+        run_gtp_conversion.delay(new_task_id)
+    else:
+        raise HTTPException(400, "Неверный тип задачи")
+
+    r.setex(status_key, 3600, b"retried")
+    return {"taskId": new_task_id, "type": job_type, "status": "pending"}
+
+
 # --- Projects API ---
 
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+TABS_ROOT = _ROOT / "gtp_tabs" / "tabs"
+TAB_EXTS = {".gp", ".gp3", ".gp4", ".gp5", ".gpx", ".gp7", ".gtp"}
+_LIBRARY_CACHE: list[dict] = []
+_LIBRARY_CACHE_TS = 0.0
+
+
+def _pretty_from_slug(value: str) -> str:
+    text = value.replace("_", " ").strip()
+    if not text:
+        return "Unknown"
+    words = []
+    for w in text.split():
+        if len(w) <= 3 and w.isalpha():
+            words.append(w.upper())
+        else:
+            words.append(w.capitalize())
+    return " ".join(words)
+
+
+def _seed_stats(path: str) -> tuple[int, float]:
+    digest = hashlib.sha1(path.encode("utf-8")).hexdigest()
+    seed = int(digest[:10], 16)
+    downloads = 150 + (seed % 25000)
+    rating = round(min(5.0, 3.6 + ((seed % 16) / 10)), 1)
+    return downloads, rating
+
+
+def _read_tab_stats() -> dict[str, tuple[int, float]]:
+    conn = _get_conn()
+    try:
+        rows = conn.execute("SELECT path, downloads, rating FROM tab_stats").fetchall()
+        out: dict[str, tuple[int, float]] = {}
+        for row in rows:
+            out[str(row[0])] = (int(row[1]), float(row[2]))
+        return out
+    finally:
+        conn.close()
+
+
+def _scan_library(force: bool = False) -> list[dict]:
+    global _LIBRARY_CACHE_TS
+    if _LIBRARY_CACHE and not force and (time.time() - _LIBRARY_CACHE_TS) < 120:
+        return _LIBRARY_CACHE
+    if not TABS_ROOT.exists():
+        _LIBRARY_CACHE.clear()
+        _LIBRARY_CACHE_TS = time.time()
+        return _LIBRARY_CACHE
+
+    stats = _read_tab_stats()
+    entries: list[dict] = []
+    for path in TABS_ROOT.rglob("*"):
+        if not path.is_file():
+            continue
+        ext = path.suffix.lower()
+        if ext not in TAB_EXTS:
+            continue
+        rel = path.relative_to(TABS_ROOT)
+        parts = rel.parts
+        if len(parts) < 3:
+            continue
+        artist_slug = parts[1]
+        file_name = parts[-1]
+        title_slug = path.stem
+        title_clean = re.sub(r"_[0-9]+$", "", title_slug)
+        title = _pretty_from_slug(title_clean)
+        artist = _pretty_from_slug(artist_slug)
+        rel_path = rel.as_posix()
+        downloads, rating = stats.get(rel_path, _seed_stats(rel_path))
+        size_kb = round(path.stat().st_size / 1024, 2)
+        entries.append(
+            {
+                "id": rel_path,
+                "path": rel_path,
+                "artistSlug": artist_slug,
+                "artist": artist,
+                "title": title,
+                "format": ext[1:],
+                "sizeKb": size_kb,
+                "downloads": downloads,
+                "rating": rating,
+            }
+        )
+
+    entries.sort(key=lambda x: (x["artist"].lower(), x["title"].lower()))
+    _LIBRARY_CACHE.clear()
+    _LIBRARY_CACHE.extend(entries)
+    _LIBRARY_CACHE_TS = time.time()
+    return _LIBRARY_CACHE
+
+
+@app.get("/library/artists")
+def library_artists():
+    rows = _scan_library()
+    by_artist: dict[str, dict] = {}
+    for row in rows:
+        slug = row["artistSlug"]
+        item = by_artist.get(slug)
+        if not item:
+            by_artist[slug] = {"artistSlug": slug, "artist": row["artist"], "tabsCount": 1}
+        else:
+            item["tabsCount"] += 1
+    artists = sorted(by_artist.values(), key=lambda x: x["artist"].lower())
+    return {"items": artists, "total": len(artists)}
+
+
+@app.get("/library/tabs")
+def library_tabs(artist_slug: str):
+    rows = _scan_library()
+    items = [r for r in rows if r["artistSlug"] == artist_slug]
+    return {"items": items, "total": len(items)}
+
+
+@app.get("/library/download")
+def library_download(path: str):
+    rel = Path(path)
+    absolute = (TABS_ROOT / rel).resolve()
+    if not str(absolute).startswith(str(TABS_ROOT.resolve())):
+        raise HTTPException(status_code=400, detail="Некорректный путь")
+    if not absolute.is_file():
+        raise HTTPException(status_code=404, detail="Табулатура не найдена")
+
+    rel_key = rel.as_posix()
+    conn = _get_conn()
+    try:
+        row = conn.execute("SELECT downloads FROM tab_stats WHERE path = ?", (rel_key,)).fetchone()
+        if row:
+            conn.execute("UPDATE tab_stats SET downloads = downloads + 1 WHERE path = ?", (rel_key,))
+        else:
+            downloads, rating = _seed_stats(rel_key)
+            conn.execute(
+                "INSERT INTO tab_stats (path, downloads, rating) VALUES (?, ?, ?)",
+                (rel_key, downloads + 1, rating),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return FileResponse(absolute, filename=absolute.name, media_type="application/octet-stream")
 
 
 @app.get("/projects")

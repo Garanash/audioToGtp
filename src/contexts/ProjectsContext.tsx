@@ -11,7 +11,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { AudioStems } from '../types/audio.types';
+import type { AudioStems, StemType } from '../types/audio.types';
 import { STEM_ORDER } from '../types/audio.types';
 import { audioBufferToWavBlob } from '../utils/audioBuffer';
 import {
@@ -56,7 +56,7 @@ async function loadStemsFromProject(
     if (!ab) continue;
     const buf = await ctx.decodeAudioData(ab);
     const stemName = name.replace(/\.wav$/i, '');
-    if (STEM_ORDER.includes(stemName as keyof AudioStems)) {
+    if (STEM_ORDER.includes(stemName as StemType)) {
       buffers[stemName] = buf;
     }
     if (!original) original = buf;

@@ -2,8 +2,6 @@
  * Иконки для пунктов навигации (стиль Moises).
  */
 
-import type { ReactNode } from 'react';
-
 const iconClass = 'h-8 w-8';
 
 export function IconDrums() {

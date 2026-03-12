@@ -40,6 +40,12 @@
 ## Поведение
 
 - **POST /separate**: при включённом Redis сначала проверяется кеш по SHA256 файла; при попадании ответ сразу. Иначе задача ставится в очередь, возвращается `taskId`; фронт опрашивает `/separate/status/{taskId}` и `/separate/result/{taskId}`.
+- **POST /convert-to-midi**: при активном async возвращает `taskId`, далее опрос `/convert-to-midi/status/{taskId}` и `/convert-to-midi/result/{taskId}`.
+- **POST /convert-to-gtp**: при активном async возвращает `taskId`, далее опрос `/convert-to-gtp/status/{taskId}` и `/convert-to-gtp/result/{taskId}`.
+- **Job Center API**:
+  - `GET /jobs/{jobType}/{taskId}` — unified status
+  - `POST /jobs/{jobType}/{taskId}/cancel` — отмена задачи
+  - `POST /jobs/{jobType}/{taskId}/retry` — повторный запуск (separate/MIDI/GTP)
 - **GET /health**: в ответе есть поля `async` и `cache` (доступность очереди и кеша).
 - **Синхронный режим**: `POST /separate?sync=true` или работа без Redis — как раньше, ответ со stems в теле (под нагрузкой может быть медленно).
 

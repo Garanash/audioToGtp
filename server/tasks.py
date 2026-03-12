@@ -4,6 +4,7 @@
 """
 
 import base64
+import json
 import shutil
 import subprocess
 import sys
@@ -16,7 +17,13 @@ import redis
 from config import (
     CACHE_KEY_PREFIX,
     CACHE_TTL_SECONDS,
+    GTP_INPUT_KEY_PREFIX,
+    GTP_RESULT_KEY_PREFIX,
+    GTP_STATUS_KEY_PREFIX,
     INPUT_KEY_PREFIX,
+    MIDI_INPUT_KEY_PREFIX,
+    MIDI_RESULT_KEY_PREFIX,
+    MIDI_STATUS_KEY_PREFIX,
     RESULT_KEY_PREFIX,
     RESULT_TTL_SECONDS,
     STATUS_KEY_PREFIX,
@@ -48,6 +55,26 @@ def _run_demucs(in_path: Path, out_dir: Path) -> tuple[str, list[str]]:
     raise RuntimeError("Demucs не смог разделить аудио")
 
 
+def _decode_separation_input(raw: bytes) -> tuple[bytes, str, str | None]:
+    """
+    Поддерживает оба формата input:
+    1) legacy: сырые bytes аудио
+    2) json: { contentB64, ext, contentHash }
+    """
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+        if isinstance(payload, dict) and isinstance(payload.get("contentB64"), str):
+            content = base64.b64decode(payload["contentB64"])
+            ext = payload.get("ext") if isinstance(payload.get("ext"), str) else ".wav"
+            content_hash = payload.get("contentHash") if isinstance(payload.get("contentHash"), str) else None
+            if not ext.startswith("."):
+                ext = ".wav"
+            return content, ext, content_hash
+    except Exception:
+        pass
+    return raw, ".wav", None
+
+
 @celery_app.task(bind=True, name="tasks.run_separation")
 def run_separation(self, task_id: str, content_hash: str | None, file_ext: str = ".wav"):
     """
@@ -68,13 +95,18 @@ def run_separation(self, task_id: str, content_hash: str | None, file_ext: str =
         if not raw:
             r.set(status_key, "failed", ex=RESULT_TTL_SECONDS)
             return {"error": "Входные данные истекли или не найдены"}
+        content, parsed_ext, parsed_hash = _decode_separation_input(raw)
+        if parsed_hash:
+            content_hash = parsed_hash
+        if parsed_ext:
+            file_ext = parsed_ext
 
         workdir = Path(tempfile.mkdtemp())
         try:
             in_dir = workdir / "input"
             in_dir.mkdir()
             in_file = in_dir / f"audio{file_ext}"
-            in_file.write_bytes(raw)
+            in_file.write_bytes(content)
             out_dir = workdir / "separated"
             out_dir.mkdir()
 
@@ -107,6 +139,90 @@ def run_separation(self, task_id: str, content_hash: str | None, file_ext: str =
             return {"ok": True, "stems_keys": list(result.keys())}
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
+    except Exception:
+        r.set(status_key, "failed", ex=RESULT_TTL_SECONDS)
+        raise
+
+
+@celery_app.task(bind=True, name="tasks.run_midi_conversion")
+def run_midi_conversion(self, task_id: str):
+    """
+    Асинхронная конвертация stems (base64 WAV) -> MIDI track data.
+    """
+    r = _get_redis()
+    input_key = f"{MIDI_INPUT_KEY_PREFIX}{task_id}"
+    result_key = f"{MIDI_RESULT_KEY_PREFIX}{task_id}"
+    status_key = f"{MIDI_STATUS_KEY_PREFIX}{task_id}"
+    try:
+        r.set(status_key, "processing", ex=RESULT_TTL_SECONDS)
+        raw = r.get(input_key)
+        if not raw:
+            r.set(status_key, "failed", ex=RESULT_TTL_SECONDS)
+            return {"error": "Входные данные не найдены"}
+
+        payload = json.loads(raw.decode("utf-8"))
+        stems_b64 = payload.get("stems") or {}
+        multi_track = bool(payload.get("multiTrack", True))
+        accuracy_mode = payload.get("accuracyMode", "balanced")
+        stems_bytes: dict[str, bytes] = {}
+        for key, b64 in stems_b64.items():
+            if isinstance(b64, str) and b64:
+                try:
+                    stems_bytes[key] = base64.b64decode(b64)
+                except Exception:
+                    continue
+        if not stems_bytes:
+            r.set(status_key, "failed", ex=RESULT_TTL_SECONDS)
+            return {"error": "Нет валидных stems"}
+
+        try:
+            from midi_service import convert_audio_to_midi_tracks
+        except ImportError:
+            from server.midi_service import convert_audio_to_midi_tracks
+
+        tracks = convert_audio_to_midi_tracks(
+            stems_bytes,
+            multi_track=multi_track,
+            accuracy_mode=accuracy_mode,
+        )
+        result_json = json.dumps({"tracks": tracks}).encode("utf-8")
+        r.setex(result_key, RESULT_TTL_SECONDS, result_json)
+        r.set(status_key, "completed", ex=RESULT_TTL_SECONDS)
+        return {"ok": True, "tracks": len(tracks)}
+    except Exception:
+        r.set(status_key, "failed", ex=RESULT_TTL_SECONDS)
+        raise
+
+
+@celery_app.task(bind=True, name="tasks.run_gtp_conversion")
+def run_gtp_conversion(self, task_id: str):
+    """
+    Асинхронная конвертация MIDI tracks -> GP5 bytes.
+    """
+    r = _get_redis()
+    input_key = f"{GTP_INPUT_KEY_PREFIX}{task_id}"
+    result_key = f"{GTP_RESULT_KEY_PREFIX}{task_id}"
+    status_key = f"{GTP_STATUS_KEY_PREFIX}{task_id}"
+    try:
+        r.set(status_key, "processing", ex=RESULT_TTL_SECONDS)
+        raw = r.get(input_key)
+        if not raw:
+            r.set(status_key, "failed", ex=RESULT_TTL_SECONDS)
+            return {"error": "Входные данные не найдены"}
+
+        payload = json.loads(raw.decode("utf-8"))
+        try:
+            from backend.schemas import ConvertRequest
+            from backend.services.gtp_service import convert_to_gp5
+        except Exception:
+            from schemas import ConvertRequest
+            from services.gtp_service import convert_to_gp5
+
+        body = ConvertRequest.model_validate(payload)
+        gp5_bytes = convert_to_gp5(body)
+        r.setex(result_key, RESULT_TTL_SECONDS, gp5_bytes)
+        r.set(status_key, "completed", ex=RESULT_TTL_SECONDS)
+        return {"ok": True, "size": len(gp5_bytes)}
     except Exception:
         r.set(status_key, "failed", ex=RESULT_TTL_SECONDS)
         raise

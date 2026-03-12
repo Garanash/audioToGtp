@@ -3,7 +3,7 @@ Pydantic-схемы запросов и ответов с валидацией.
 Все входные данные проверяются по типам и лимитам.
 """
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -38,6 +38,12 @@ class MidiNoteIn(BaseModel):
     startTime: float = Field(..., ge=0, description="Время начала в секундах")
     endTime: float = Field(..., ge=0, description="Время конца в секундах")
     velocity: int = Field(100, ge=VELOCITY_MIN, le=VELOCITY_MAX, description="Скорость нажатия 0–127")
+    confidence: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Уверенность распознавания ноты (0..1), опционально",
+    )
 
     @field_validator("endTime")
     @classmethod
@@ -60,4 +66,14 @@ class ConvertRequest(BaseModel):
 
     tracks: List[MidiTrackIn] = Field(..., min_length=1, max_length=MAX_TRACKS)
     tempo: int = Field(120, ge=MIN_TEMPO, le=MAX_TEMPO, description="Темп в BPM")
+    baseTempo: Optional[int] = Field(
+        None,
+        ge=MIN_TEMPO,
+        le=MAX_TEMPO,
+        description="Базовый темп, в котором рассчитаны startTime/endTime (для корректного масштабирования при ручном BPM override)",
+    )
     key: Optional[str] = Field(None, max_length=16, description="Тональность, например C, Am, F#")
+    accuracyMode: Literal["balanced", "max", "ultra", "extreme"] = Field(
+        "balanced",
+        description="Режим точности конвертации: balanced | max | ultra | extreme",
+    )

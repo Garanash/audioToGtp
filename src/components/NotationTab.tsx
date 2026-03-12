@@ -6,21 +6,16 @@ import { useCallback, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AlphaTabPlayer } from './AlphaTabPlayer';
 import type { MidiTrackData } from '../types/audio.types';
+import { UploadDropzone } from './common/UploadDropzone';
 
 const NOTATION_EXTENSIONS = /\.(gp|gp3|gp4|gp5|gpx|gp7|gtp|mid|midi|xml|musicxml)$/i;
-const MIN_TEMPO = 20;
-const MAX_TEMPO = 300;
-const DEFAULT_TEMPO = 120;
-
 interface NotationTabProps {
   convertedTracks?: MidiTrackData[] | null;
 }
 
 export function NotationTab({ convertedTracks }: NotationTabProps) {
   const [notationFile, setNotationFile] = useState<File | null>(null);
-  const [tempo, setTempo] = useState(DEFAULT_TEMPO);
   const [error, setError] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
   const [userWantsUpload, setUserWantsUpload] = useState(false);
 
   const hasFile = notationFile !== null;
@@ -51,61 +46,11 @@ export function NotationTab({ convertedTracks }: NotationTabProps) {
     [validateFile]
   );
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragging(false);
-      const file = e.dataTransfer.files[0];
-      if (file) handleFile(file);
-    },
-    [handleFile]
-  );
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  }, []);
-
-  const handleInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) handleFile(file);
-      e.target.value = '';
-    },
-    [handleFile]
-  );
-
   const clearAndShowUpload = useCallback(() => {
     setNotationFile(null);
     setError(null);
     setUserWantsUpload(true);
   }, []);
-
-  const loadTestFile = useCallback(async () => {
-    setError(null);
-    try {
-      const res = await fetch(import.meta.env.BASE_URL + 'sample.xml');
-      const blob = await res.blob();
-      handleFile(new File([blob], 'sample.xml', { type: 'application/xml' }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Ошибка загрузки');
-    }
-  }, [handleFile]);
-
-  const effectiveTempo = Math.min(MAX_TEMPO, Math.max(MIN_TEMPO, tempo));
-
-  const handleTempoChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = Number(e.target.value.trim());
-      if (!Number.isNaN(value)) setTempo(Math.round(value));
-    },
-    []
-  );
 
   if (showPlayer) {
     return (
@@ -114,41 +59,13 @@ export function NotationTab({ convertedTracks }: NotationTabProps) {
         animate={{ opacity: 1, y: 0 }}
         className="flex min-h-[calc(100vh-220px)] flex-col gap-4"
       >
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-4">
-            <p className="text-sm text-[#A0A0A0]">
-              {hasFile
-                ? `Файл: ${notationFile!.name}`
-                : 'Показаны треки из конвертера'}
-            </p>
-            <label className="flex items-center gap-2 text-sm text-[#A0A0A0]">
-              <span>Темп, BPM:</span>
-              <input
-                type="number"
-                min={MIN_TEMPO}
-                max={MAX_TEMPO}
-                step={1}
-                value={effectiveTempo}
-                onChange={handleTempoChange}
-                className="w-20 rounded-lg border border-[#2A2A2A] bg-[#1A1A1A] px-3 py-1.5 text-[#E0E0E0] focus:border-[#8A2BE2] focus:outline-none"
-              />
-            </label>
-          </div>
-          <button
-            onClick={clearAndShowUpload}
-            type="button"
-            className="rounded-lg border border-[#2A2A2A] px-4 py-2 text-sm font-medium text-[#A0A0A0] transition-colors hover:border-[#8A2BE2] hover:text-[#E0E0E0]"
-          >
-            Загрузить другой файл
-          </button>
-        </div>
         <div className="min-h-0 flex-1">
           {hasFile ? (
-            <AlphaTabPlayer file={notationFile} tempo={effectiveTempo} />
+            <AlphaTabPlayer file={notationFile} fileName={notationFile?.name} onReplaceFile={clearAndShowUpload} />
           ) : (
             <AlphaTabPlayer
               tracks={convertedTracks!}
-              tempo={effectiveTempo}
+              onReplaceFile={clearAndShowUpload}
             />
           )}
         </div>
@@ -160,66 +77,25 @@ export function NotationTab({ convertedTracks }: NotationTabProps) {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-2xl border border-[#2A2A2A] bg-[#111111] p-8"
+      className="space-y-4"
     >
-      <h3 className="mb-4 text-xl font-bold text-[#E0E0E0]">
-        Нотная запись
-      </h3>
-      <p className="mb-6 text-[#A0A0A0]">
-        Загрузите файл Guitar Pro или MIDI — он отобразится в проигрывателе.
-      </p>
-
-      <div
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        className={`relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-8 py-16 transition-all ${
-          isDragging
-            ? 'border-[#8A2BE2] bg-[#8A2BE2]/10'
-            : 'border-[#2A2A2A] hover:border-[#3A3A3A]'
-        }`}
-      >
-        <input
-          type="file"
-          accept=".gp,.gp3,.gp4,.gp5,.gpx,.gp7,.gtp,.mid,.midi,.xml,.musicxml"
-          onChange={handleInputChange}
-          className="absolute inset-0 cursor-pointer opacity-0"
-        />
-        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#8A2BE2]/20">
-          <i className="fas fa-music text-2xl text-[#8A2BE2]" />
-        </div>
-        <p className="mb-2 text-lg font-medium text-[#E0E0E0]">
-          Перетащите файл или нажмите для выбора
-        </p>
-        <p className="mb-4 text-sm text-[#A0A0A0]">
-          .gp, .gp3, .gp4, .gp5, .gpx, .gp7, .gtp, .mid, .midi, .xml
-        </p>
-        <label className="cursor-pointer rounded-full bg-gradient-to-r from-[#8A2BE2] to-[#4B0082] px-8 py-3 font-semibold text-white transition-all duration-300 hover:scale-105">
-          Выбрать файл
-          <input
-            type="file"
-          accept=".gp,.gp3,.gp4,.gp5,.gpx,.gp7,.gtp,.mid,.midi,.xml,.musicxml"
-          onChange={handleInputChange}
-          className="hidden"
-          />
-        </label>
-      </div>
-      <button
-        type="button"
-        onClick={loadTestFile}
-        className="mt-4 text-sm text-[#A0A0A0] underline hover:text-[#8A2BE2]"
-      >
-        Тест: загрузить sample.xml
-      </button>
+      <UploadDropzone
+        accept=".gp,.gp3,.gp4,.gp5,.gpx,.gp7,.gtp,.mid,.midi,.xml,.musicxml"
+        onFileSelect={handleFile}
+        title="Перетащите файл сюда или нажмите для выбора"
+        subtitle="Ноты и табы: Guitar Pro, MIDI, MusicXML"
+        formatsHint=".gp, .gp3, .gp4, .gp5, .gpx, .gp7, .gtp, .mid, .midi, .xml · до 50 МБ"
+        icon={(
+          <svg className="h-5 w-5 text-[#8A2BE2]" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M16 4v10a3 3 0 1 1-2-2.82V6.2l6-1.5v8.8a3 3 0 1 1-2-2.82V7.3l-2 .5Z" />
+            <path d="M3 7h7v1.8H3zm0 3.8h7v1.8H3zm0 3.8h7v1.8H3z" />
+          </svg>
+        )}
+      />
 
       {error && (
         <p className="mt-4 text-sm text-red-400">{error}</p>
       )}
-
-      <link
-        rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-      />
     </motion.div>
   );
 }

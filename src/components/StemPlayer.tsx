@@ -7,6 +7,15 @@ import { audioBufferToWavBlob } from '../utils/audioBuffer';
 const DEFAULT_VOLUME = 80; // 0–100%
 const SEEK_STEP_SEC = 0.1;
 const SEEK_NUDGE_SEC = 5;
+const ORIGINAL_KEY = '__original';
+const STEM_COLORS: Record<StemType, { bg: string; text: string; line: string }> = {
+  vocals: { bg: 'bg-pink-500/20', text: 'text-pink-300', line: '#EC4899' },
+  bass: { bg: 'bg-emerald-500/20', text: 'text-emerald-300', line: '#10B981' },
+  drums: { bg: 'bg-amber-500/20', text: 'text-amber-300', line: '#F59E0B' },
+  guitar: { bg: 'bg-violet-500/20', text: 'text-violet-300', line: '#8B5CF6' },
+  piano: { bg: 'bg-sky-500/20', text: 'text-sky-300', line: '#0EA5E9' },
+  other: { bg: 'bg-indigo-500/20', text: 'text-indigo-300', line: '#6366F1' },
+};
 
 interface StemPlayerProps {
   stems: AudioStems;
@@ -32,6 +41,23 @@ function downloadBlob(blob: Blob, filename: string) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+function buildWaveformBars(buffer: AudioBuffer, bars = 72): number[] {
+  const data = buffer.getChannelData(0);
+  const blockSize = Math.max(1, Math.floor(data.length / bars));
+  const points: number[] = [];
+  for (let i = 0; i < bars; i++) {
+    const start = i * blockSize;
+    const end = Math.min(data.length, start + blockSize);
+    let peak = 0;
+    for (let j = start; j < end; j++) {
+      const abs = Math.abs(data[j]);
+      if (abs > peak) peak = abs;
+    }
+    points.push(peak);
+  }
+  return points;
 }
 
 function StemIcon({ stem }: { stem: StemType }) {
@@ -211,6 +237,18 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
   const [playing, setPlaying] = useState(false);
   const [positionSec, setPositionSec] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
+  const [focusedStem, setFocusedStem] = useState<StemType | null>(null);
+  const [layoutMode, setLayoutMode] = useState<'studio' | 'compact'>('studio');
+  const [abStem, setAbStem] = useState<StemType | null>(null);
+  const [abSide, setAbSide] = useState<'A' | 'B'>('A');
+  const stemWaveforms = useMemo(() => {
+    const entries: Partial<Record<StemType, number[]>> = {};
+    stemKeys.forEach((stem) => {
+      const buffer = stems[stem];
+      if (buffer) entries[stem] = buildWaveformBars(buffer, 64);
+    });
+    return entries;
+  }, [stemKeys, stems]);
 
   useEffect(() => {
     setVolumes((prev) => {
@@ -218,6 +256,7 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
       stemKeys.forEach((k) => {
         if (next[k] === undefined) next[k] = DEFAULT_VOLUME;
       });
+      if (next[ORIGINAL_KEY] === undefined) next[ORIGINAL_KEY] = 0;
       return next;
     });
   }, [stemKeys.join(',')]);
@@ -282,6 +321,11 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
       const vol = clamp((volumes[stem] ?? DEFAULT_VOLUME) / 100, 0, 1);
       gain.gain.setValueAtTime(vol, now);
     });
+    const originalGain = gainNodesRef.current.get(ORIGINAL_KEY);
+    if (originalGain) {
+      const originalVol = clamp((volumes[ORIGINAL_KEY] ?? 0) / 100, 0, 1);
+      originalGain.gain.setValueAtTime(originalVol, now);
+    }
   }, [stemKeys, volumes]);
 
   const buildSources = useCallback(
@@ -315,6 +359,15 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
         };
         sourcesRef.current.set(stem, source);
       });
+
+      const originalGain = ctx.createGain();
+      originalGain.gain.value = clamp((volumes[ORIGINAL_KEY] ?? 0) / 100, 0, 1);
+      originalGain.connect(ctx.destination);
+      gainNodesRef.current.set(ORIGINAL_KEY, originalGain);
+      const originalSource = ctx.createBufferSource();
+      originalSource.buffer = stems.original;
+      originalSource.connect(originalGain);
+      sourcesRef.current.set(ORIGINAL_KEY, originalSource);
 
       applyGainValues();
       offsetRef.current = clamp(offsetSeconds, 0, duration);
@@ -435,6 +488,7 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
       stemKeys.forEach((name) => {
         newVolumes[name] = name === stem ? 100 : 0;
       });
+      newVolumes[ORIGINAL_KEY] = 0;
       setVolumes(newVolumes);
       const ctx = audioContextRef.current;
       stemKeys.forEach((name) => {
@@ -443,6 +497,9 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
           gain.gain.setValueAtTime(name === stem ? 1 : 0, ctx.currentTime);
         }
       });
+      const originalGain = gainNodesRef.current.get(ORIGINAL_KEY);
+      if (originalGain && ctx) originalGain.gain.setValueAtTime(0, ctx.currentTime);
+      setFocusedStem(stem as StemType);
     },
     [stemKeys]
   );
@@ -450,6 +507,7 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
   const unmuteAll = useCallback(() => {
     const newVolumes: Record<string, number> = {};
     stemKeys.forEach((name) => (newVolumes[name] = DEFAULT_VOLUME));
+    newVolumes[ORIGINAL_KEY] = 0;
     setVolumes(newVolumes);
     const ctx = audioContextRef.current;
     stemKeys.forEach((name) => {
@@ -458,7 +516,49 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
         gain.gain.setValueAtTime(DEFAULT_VOLUME / 100, ctx.currentTime);
       }
     });
+    const originalGain = gainNodesRef.current.get(ORIGINAL_KEY);
+    if (originalGain && ctx) originalGain.gain.setValueAtTime(0, ctx.currentTime);
+    setFocusedStem(null);
   }, [stemKeys]);
+
+  const playStem = useCallback(
+    async (stem: StemType) => {
+      solo(stem);
+      if (!playing) {
+        await play();
+      }
+    },
+    [play, playing, solo]
+  );
+
+  const playOriginal = useCallback(async () => {
+    const newVolumes: Record<string, number> = {};
+    stemKeys.forEach((name) => (newVolumes[name] = 0));
+    newVolumes[ORIGINAL_KEY] = 100;
+    setVolumes(newVolumes);
+    const ctx = audioContextRef.current;
+    stemKeys.forEach((name) => {
+      const gain = gainNodesRef.current.get(name);
+      if (gain && ctx) gain.gain.setValueAtTime(0, ctx.currentTime);
+    });
+    const originalGain = gainNodesRef.current.get(ORIGINAL_KEY);
+    if (originalGain && ctx) originalGain.gain.setValueAtTime(1, ctx.currentTime);
+    setFocusedStem(null);
+    if (!playing) {
+      await play();
+    }
+  }, [play, playing, stemKeys]);
+
+  const toggleAB = useCallback(async () => {
+    if (!abStem) return;
+    const nextSide: 'A' | 'B' = abSide === 'A' ? 'B' : 'A';
+    setAbSide(nextSide);
+    if (nextSide === 'A') {
+      await playStem(abStem);
+    } else {
+      await playOriginal();
+    }
+  }, [abSide, abStem, playOriginal, playStem]);
 
   const downloadStem = useCallback(
     (stem: StemType) => {
@@ -474,9 +574,38 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-2xl border border-[#2A2A2A] bg-[#111111] p-8"
+      className="rounded-2xl border border-[#2A2A2A] bg-[#111111] p-6"
     >
-      <div className="mb-6 rounded-xl border border-[#2A2A2A] bg-[#0A0A0A] p-4">
+      <div className="mb-4 rounded-xl border border-[#2A2A2A] bg-[#0A0A0A] p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          {stemKeys.map((stem) => (
+            <span
+              key={`chip-${stem}`}
+              className={`rounded-full border border-[#2A2A2A] px-3 py-1 text-xs ${STEM_COLORS[stem].bg} ${STEM_COLORS[stem].text}`}
+            >
+              {STEM_LABELS[stem]}
+            </span>
+          ))}
+          <span className="ml-auto rounded-full border border-[#2A2A2A] bg-[#111111] px-3 py-1 text-xs text-[#A0A0A0]">
+            {formatTime(duration)}
+          </span>
+          <div className="flex items-center gap-1 rounded-lg border border-[#2A2A2A] bg-[#111111] p-1">
+            <button
+              type="button"
+              onClick={() => setLayoutMode('studio')}
+              className={`rounded-md px-2 py-1 text-xs ${layoutMode === 'studio' ? 'bg-[#8A2BE2]/25 text-[#E0E0E0]' : 'text-[#A0A0A0]'}`}
+            >
+              Studio
+            </button>
+            <button
+              type="button"
+              onClick={() => setLayoutMode('compact')}
+              className={`rounded-md px-2 py-1 text-xs ${layoutMode === 'compact' ? 'bg-[#8A2BE2]/25 text-[#E0E0E0]' : 'text-[#A0A0A0]'}`}
+            >
+              Compact
+            </button>
+          </div>
+        </div>
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
@@ -531,6 +660,16 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
             +{SEEK_NUDGE_SEC}s
           </button>
           <div className="min-w-0 flex-1" />
+          {abStem && (
+            <button
+              type="button"
+              onClick={() => void toggleAB()}
+              className="rounded-lg border border-[#2A2A2A] px-3 py-2 text-xs font-semibold text-[#E0E0E0] transition-colors hover:border-[#8A2BE2]"
+              title="A/B: A = выбранная дорожка, B = оригинал"
+            >
+              A/B {abSide} · {STEM_LABELS[abStem]}
+            </button>
+          )}
           <div className="font-mono text-sm text-[#A0A0A0]">
             {formatTime(positionSec)} / {formatTime(duration)}
           </div>
@@ -558,44 +697,34 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className={`grid gap-3 ${layoutMode === 'compact' ? 'md:grid-cols-2' : ''}`}>
         {stemKeys.map((stem) => (
           <div
             key={stem}
-            className="flex items-center gap-4 rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] p-4"
+            className={`rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] p-3 ${
+              layoutMode === 'compact' ? 'flex flex-col gap-3' : 'flex items-center gap-4'
+            }`}
           >
-            <div className="flex w-[52px] shrink-0 items-center justify-center">
-              <div
-                className="flex h-11 w-11 items-center justify-center rounded-full bg-[#8A2BE2]/20 text-[#8A2BE2]"
-                title={STEM_LABELS[stem]}
-              >
-                <StemIcon stem={stem} />
+            <div className={layoutMode === 'compact' ? 'flex items-center gap-3' : 'contents'}>
+              <div className="h-12 w-1 shrink-0 rounded-full" style={{ backgroundColor: STEM_COLORS[stem].line }} />
+              <div className="flex w-[52px] shrink-0 items-center justify-center">
+                <div
+                  className={`flex h-11 w-11 items-center justify-center rounded-full ${STEM_COLORS[stem].bg} ${STEM_COLORS[stem].text}`}
+                  title={STEM_LABELS[stem]}
+                >
+                  <StemIcon stem={stem} />
+                </div>
+                <span className="sr-only">{STEM_LABELS[stem]}</span>
               </div>
-              <span className="sr-only">{STEM_LABELS[stem]}</span>
             </div>
-            <div className="flex flex-1 items-center gap-2">
-              <span className="w-8 text-xs text-[#A0A0A0]">0%</span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={volumes[stem] ?? DEFAULT_VOLUME}
-                onChange={(e) => setVolume(stem, parseInt(e.target.value, 10))}
-                className="h-2 flex-1 appearance-none rounded-full bg-[#2A2A2A] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#8A2BE2]"
-              />
-              <span className="w-10 text-xs text-[#A0A0A0]">
-                {volumes[stem] ?? DEFAULT_VOLUME}%
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
+            <div className={`flex ${layoutMode === 'compact' ? 'w-full flex-wrap' : ''} items-center gap-2`}>
               <button
-                onClick={() => downloadStem(stem)}
+                onClick={() => void playStem(stem)}
                 type="button"
-                className="rounded-lg border border-emerald-600/30 bg-emerald-500/10 p-2 text-emerald-400 transition-colors hover:border-emerald-500/50 hover:bg-emerald-500/15 hover:text-emerald-300"
-                title="Скачать WAV"
+                className="rounded-lg border border-[#2A2A2A] px-3 py-2 text-xs font-semibold text-[#E0E0E0] transition-colors hover:border-[#8A2BE2]"
+                title="Проиграть дорожку"
               >
-                <DownloadIcon className="h-5 w-5" />
+                Play
               </button>
               <button
                 onClick={() => solo(stem)}
@@ -605,7 +734,63 @@ export function StemPlayer({ stems, duration, baseFilename = 'stems' }: StemPlay
               >
                 Solo
               </button>
+              <button
+                onClick={() => {
+                  setAbStem(stem);
+                  setAbSide('A');
+                  void playStem(stem);
+                }}
+                type="button"
+                className="rounded-lg border border-[#2A2A2A] px-3 py-2 text-xs font-semibold text-[#A0A0A0] transition-colors hover:border-[#8A2BE2] hover:text-[#E0E0E0]"
+                title="Подготовить A/B сравнение с оригиналом"
+              >
+                A/B
+              </button>
             </div>
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-[#E0E0E0]">{STEM_LABELS[stem]}</span>
+                <span className="text-xs text-[#7F7F7F]">{volumes[stem] ?? DEFAULT_VOLUME}%</span>
+              </div>
+              {layoutMode === 'studio' && (
+              <div className="mb-2 flex h-10 items-end gap-[2px] overflow-hidden rounded-md border border-[#232323] bg-[#101010] px-1">
+                {(stemWaveforms[stem] ?? []).map((peak, i) => (
+                  <div
+                    key={`${stem}-bar-${i}`}
+                    className="w-full rounded-[2px]"
+                    style={{
+                      height: `${Math.max(6, Math.min(34, peak * 36))}px`,
+                      backgroundColor: STEM_COLORS[stem].line,
+                      opacity: focusedStem && focusedStem !== stem ? 0.35 : 0.9,
+                    }}
+                  />
+                ))}
+              </div>
+              )}
+              <div className="flex items-center gap-2">
+                <span className="w-8 text-xs text-[#A0A0A0]">0%</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={volumes[stem] ?? DEFAULT_VOLUME}
+                onChange={(e) => setVolume(stem, parseInt(e.target.value, 10))}
+                className="h-2 flex-1 appearance-none rounded-full bg-[#2A2A2A] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#8A2BE2]"
+              />
+                <span className="w-8 text-xs text-[#A0A0A0]">100%</span>
+              </div>
+            </div>
+            <button
+              onClick={() => downloadStem(stem)}
+              type="button"
+              className={`rounded-lg border border-emerald-600/30 bg-emerald-500/10 p-2 text-emerald-400 transition-colors hover:border-emerald-500/50 hover:bg-emerald-500/15 hover:text-emerald-300 ${
+                layoutMode === 'compact' ? 'self-end' : ''
+              }`}
+              title="Скачать WAV"
+            >
+              <DownloadIcon className="h-5 w-5" />
+            </button>
           </div>
         ))}
       </div>

@@ -31,6 +31,20 @@ npm run download-model
 npm run dev
 ```
 
+## Docker (рекомендуется)
+
+Полный стек в контейнерах: frontend + API + Celery worker + Redis.
+
+```bash
+docker compose up --build
+```
+
+- UI: `http://localhost:5173`
+- API: `http://localhost:8000`
+- Redis: `localhost:6379`
+
+По умолчанию в Docker включен `USE_CELERY=1`, поэтому разделение, MIDI и GTP идут через async-очередь.
+
 ## Сборка
 
 ```bash
@@ -60,8 +74,9 @@ npm run build
 
 ## Детали
 
-1. **Demucs (качественное разделение):** Выполните `npm run setup` (создаёт `.venv` и устанавливает demucs-infer). Затем `npm run dev` — backend на порту 8000 запустится вместе с Vite. Redis и Celery по умолчанию отключены; разделение идёт синхронно.
+1. **Demucs (качественное разделение):** Выполните `npm run setup` (создаёт `.venv` и устанавливает demucs-infer). Затем `npm run dev` — backend на порту 8000 запустится вместе с Vite.
 2. **Demucs (браузерный fallback):** Модель (~172 МБ) скачивается с Hugging Face и кэшируется в IndexedDB.
 2. **Basic Pitch:** Модель загружается с unpkg CDN автоматически.
 3. **COOP/COEP:** Требуются для SharedArrayBuffer (ONNX). Настроены в `vite.config.ts` для dev/preview. Для production добавьте заголовки на уровне сервера.
 4. **GTP:** Для конвертации MIDI → GTP запустите бэкенд: `cd backend && pip install fastapi uvicorn guitarpro && uvicorn main:app --reload`
+5. **Job Center:** в UI отображаются async-задачи (separate/midi/gtp), доступна отмена и повторный запуск (retry), история сохраняется между перезагрузками.

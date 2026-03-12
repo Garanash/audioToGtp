@@ -3,21 +3,26 @@
  * Сохранение и загрузка проектов для авторизованных пользователей.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { FileUploader } from './FileUploader';
-import { ProcessingStatus } from './ProcessingStatus';
 import { StemPlayer } from './StemPlayer';
+import { ProgressInlineBar } from './common/ProgressInlineBar';
 import { useAudioSeparation } from '../hooks/useAudioSeparation';
 import { useAuth } from '../contexts/AuthContext';
 import { useProjects } from '../contexts/ProjectsContext';
 import type { ProjectListItem } from '../types/project.types';
 
-export function SeparationTab() {
+interface SeparationTabProps {
+  onWorkflowStateChange?: (state: { started: boolean; loading: boolean; ready: boolean }) => void;
+}
+
+export function SeparationTab({ onWorkflowStateChange }: SeparationTabProps = {}) {
   const [baseFilename, setBaseFilename] = useState('stems');
   const [saveName, setSaveName] = useState('');
   const [saving, setSaving] = useState(false);
   const [loadingProjectId, setLoadingProjectId] = useState<string | null>(null);
+  const [hasStarted, setHasStarted] = useState(false);
   const { user } = useAuth();
   const {
     list: projectsList,
@@ -44,6 +49,7 @@ export function SeparationTab() {
 
   const handleFileSelect = useCallback(
     (file: File) => {
+      setHasStarted(true);
       setBaseFilename(file.name.replace(/\.[^.]+$/, ''));
       separate(file);
     },
@@ -69,6 +75,7 @@ export function SeparationTab() {
       try {
         const result = await loadSeparationProject(project.id);
         if (result) {
+          setHasStarted(true);
           setStemsFromProject(result.stems);
           setBaseFilename(project.name);
         }
@@ -86,8 +93,32 @@ export function SeparationTab() {
     [deleteProject]
   );
 
+  const handleReset = useCallback(() => {
+    reset();
+    setHasStarted(false);
+    setBaseFilename('stems');
+  }, [reset]);
+
   const status = isLoading ? 'separating' : stems ? 'ready' : 'idle';
-  const effectiveError = status === 'idle' ? undefined : (error ?? undefined);
+  const processingLabelByStatus: Record<string, string> = {
+    separating: 'Разделяем трек на дорожки...',
+    ready: 'Готово!',
+  };
+  const detailedStage = isLoading
+    ? progress < 10
+      ? 'Подготовка файла и валидация формата'
+      : progress < 30
+        ? 'Загрузка/инициализация модели разделения'
+        : progress < 65
+          ? 'Анализ спектра и поиск источников'
+          : progress < 90
+            ? 'Сборка дорожек: Vocal / Drums / Bass / Other'
+            : 'Финализация и подготовка результата'
+    : null;
+
+  useEffect(() => {
+    onWorkflowStateChange?.({ started: hasStarted, loading: isLoading, ready: Boolean(stems) });
+  }, [hasStarted, isLoading, stems, onWorkflowStateChange]);
 
   return (
     <motion.div
@@ -141,19 +172,35 @@ export function SeparationTab() {
         </section>
       )}
 
-      <FileUploader
-        onFileSelect={handleFileSelect}
-        disabled={isLoading}
-      />
+      {!hasStarted && (
+        <FileUploader
+          onFileSelect={handleFileSelect}
+          disabled={isLoading}
+        />
+      )}
 
-      <ProcessingStatus
-        status={status}
-        progress={progress}
-        downloadProgress={downloadProgress}
-        error={effectiveError}
-        separationWarning={separationWarning ?? undefined}
-        usedFallback={usedFallback}
-      />
+      {isLoading && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#0A0A0A]/55 backdrop-blur-[2px]">
+          <div className="w-full max-w-md px-4">
+            <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#0F0F10]/95 p-4 shadow-2xl">
+              <div className="mb-3 flex items-center gap-3">
+                <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#8A2BE2] border-t-transparent" />
+                <p className="text-sm font-medium text-[#E0E0E0]">
+                  {processingLabelByStatus[status] ?? 'Обработка...'}
+                </p>
+              </div>
+              <ProgressInlineBar
+                value={progress}
+                label={detailedStage ?? processingLabelByStatus[status] ?? 'Обработка...'}
+                className="mb-2"
+              />
+              {downloadProgress > 0 && downloadProgress < 100 && (
+                <p className="text-right text-[11px] text-[#7F7F7F]">Скачивание модели: {Math.round(downloadProgress)}%</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {stems && (
         <>
@@ -181,13 +228,19 @@ export function SeparationTab() {
               </button>
             </div>
           )}
+          {error && (
+            <p className="text-sm text-red-400">{error}</p>
+          )}
+          {separationWarning && (
+            <p className={`text-sm ${usedFallback ? 'text-amber-300' : 'text-[#A0A0A0]'}`}>{separationWarning}</p>
+          )}
         </>
       )}
 
       {status !== 'idle' && (
         <div className="flex justify-center">
           <button
-            onClick={reset}
+            onClick={handleReset}
             className="rounded-full border border-[#2A2A2A] px-8 py-3 font-medium text-[#A0A0A0] transition-all hover:border-[#3A3A3A] hover:text-[#E0E0E0]"
           >
             Начать заново

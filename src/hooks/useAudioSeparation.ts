@@ -5,13 +5,27 @@
 
 import { useCallback, useRef, useState } from 'react';
 import type { AudioStems } from '../types/audio.types';
-import { fileToAudioBuffer, resampleTo44100Stereo } from '../utils/audioBuffer';
+import {
+  DEMUCS_FAST_SAMPLE_RATE,
+  DEMUCS_SAMPLE_RATE,
+  fileToAudioBuffer,
+  resampleToStereo,
+} from '../utils/audioBuffer';
 import {
   getCachedModel,
   cacheModel,
   DEMUCS_MODEL_KEY,
 } from '../utils/modelCache';
 import { validateStemSeparation } from '../utils/stemValidation';
+
+type AsyncTaskType = 'separate' | 'midi' | 'gtp';
+type AsyncTaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'unknown';
+interface AsyncTaskEvent {
+  id: string;
+  type: AsyncTaskType;
+  status: AsyncTaskStatus;
+  title: string;
+}
 
 export interface UseAudioSeparationResult {
   stems: AudioStems | null;
@@ -25,6 +39,10 @@ export interface UseAudioSeparationResult {
   loadStemsFromFiles: (files: File[]) => Promise<AudioStems | null>;
   setStemsFromProject: (stems: AudioStems) => void;
   reset: () => void;
+}
+
+interface UseAudioSeparationOptions {
+  onAsyncTask?: (task: AsyncTaskEvent) => void;
 }
 
 const MODEL_URL_REMOTE =
@@ -50,14 +68,19 @@ async function safeJson<T>(response: Response, fallback: T): Promise<T> {
   }
 }
 
-const POLL_INTERVAL_MS = 1500;
+const POLL_INTERVAL_MS = 900;
 const POLL_MAX_ATTEMPTS = 400; // ~10 min
+const FAST_SEPARATION_THRESHOLD_SEC = 180;
 
-async function pollSeparateResult(taskId: string): Promise<Record<string, string>> {
+async function pollSeparateResult(
+  taskId: string,
+  onStatus?: (status: AsyncTaskStatus) => void
+): Promise<Record<string, string>> {
   for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
     const statusRes = await fetch(`${BACKEND_URL}/separate/status/${taskId}`);
     if (!statusRes.ok) continue;
     const statusData = await safeJson<{ status?: string }>(statusRes, {});
+    if (statusData.status) onStatus?.(statusData.status as AsyncTaskStatus);
     if (statusData.status === 'completed') {
       const resultRes = await fetch(`${BACKEND_URL}/separate/result/${taskId}`);
       if (!resultRes.ok) throw new Error('Не удалось получить результат разделения');
@@ -65,6 +88,9 @@ async function pollSeparateResult(taskId: string): Promise<Record<string, string
     }
     if (statusData.status === 'failed') {
       throw new Error('Серверная задача разделения завершилась с ошибкой');
+    }
+    if (statusData.status === 'cancelled') {
+      throw new Error('Задача разделения отменена');
     }
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
@@ -77,7 +103,10 @@ function stemsFromData(data: Record<string, string>): boolean {
   );
 }
 
-async function separateViaBackend(file: File): Promise<AudioStems | null> {
+async function separateViaBackend(
+  file: File,
+  onTask?: (task: AsyncTaskEvent) => void
+): Promise<AudioStems | null> {
   let res: Response;
   try {
     res = await fetch(`${BACKEND_URL}/health`);
@@ -109,8 +138,13 @@ async function separateViaBackend(file: File): Promise<AudioStems | null> {
 
   const taskId = typeof data?.taskId === 'string' ? data.taskId : null;
   const dataStems = taskId
-    ? await pollSeparateResult(taskId)
+    ? await pollSeparateResult(taskId, (status) =>
+        onTask?.({ id: taskId, type: 'separate', status, title: 'Разделение на дорожки' })
+      )
     : (data as Record<string, string>);
+  if (taskId) {
+    onTask?.({ id: taskId, type: 'separate', status: 'completed', title: 'Разделение на дорожки' });
+  }
 
   if (!stemsFromData(dataStems)) return null;
 
@@ -167,7 +201,7 @@ function matchStemName(filename: string): keyof Omit<AudioStems, 'original'> | n
   return null;
 }
 
-export function useAudioSeparation(): UseAudioSeparationResult {
+export function useAudioSeparation(options: UseAudioSeparationOptions = {}): UseAudioSeparationResult {
   const [stems, setStems] = useState<AudioStems | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -199,7 +233,7 @@ export function useAudioSeparation(): UseAudioSeparationResult {
 
     try {
       setProgress(5);
-      const backendStems = await separateViaBackend(file);
+      const backendStems = await separateViaBackend(file, options.onAsyncTask);
       if (backendStems) {
         setProgress(100);
         setStems(backendStems);
@@ -212,7 +246,11 @@ export function useAudioSeparation(): UseAudioSeparationResult {
       );
 
       const audioBuffer = await fileToAudioBuffer(file);
-      const resampled = resampleTo44100Stereo(audioBuffer);
+      const targetSampleRate =
+        audioBuffer.duration >= FAST_SEPARATION_THRESHOLD_SEC
+          ? DEMUCS_FAST_SAMPLE_RATE
+          : DEMUCS_SAMPLE_RATE;
+      const resampled = resampleToStereo(audioBuffer, targetSampleRate);
       const left = resampled.getChannelData(0);
       const right = resampled.getChannelData(1);
 
@@ -309,22 +347,22 @@ export function useAudioSeparation(): UseAudioSeparationResult {
         drums: createAudioBufferFromChannels(
           result.drums.left,
           result.drums.right,
-          44100
+          targetSampleRate
         ),
         bass: createAudioBufferFromChannels(
           result.bass.left,
           result.bass.right,
-          44100
+          targetSampleRate
         ),
         other: createAudioBufferFromChannels(
           result.other.left,
           result.other.right,
-          44100
+          targetSampleRate
         ),
         vocals: createAudioBufferFromChannels(
           result.vocals.left,
           result.vocals.right,
-          44100
+          targetSampleRate
         ),
       };
 
@@ -333,7 +371,11 @@ export function useAudioSeparation(): UseAudioSeparationResult {
       if (validation.warning) {
         setSeparationWarning(validation.warning);
       } else {
-        setSeparationWarning(null);
+        setSeparationWarning(
+          targetSampleRate < DEMUCS_SAMPLE_RATE
+            ? 'Включен Turbo-режим разделения для длинного трека (быстрее, с небольшим компромиссом детализации).'
+            : null
+        );
       }
 
       setProgress(100);
@@ -368,7 +410,7 @@ export function useAudioSeparation(): UseAudioSeparationResult {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [options.onAsyncTask]);
 
   const loadStemsFromFiles = useCallback(
     async (files: File[]): Promise<AudioStems | null> => {

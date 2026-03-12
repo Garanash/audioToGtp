@@ -5,7 +5,6 @@
 import type {
   Project,
   ProjectListItem,
-  ProjectType,
   SeparationProject,
 } from '../types/project.types';
 

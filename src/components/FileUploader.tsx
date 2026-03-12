@@ -5,12 +5,17 @@ import {
   SUPPORTED_AUDIO_FORMATS,
   MAX_FILE_SIZE_BYTES,
 } from '../types/audio.types';
+import { UploadDropzone } from './common/UploadDropzone';
+import { ProgressInlineBar } from './common/ProgressInlineBar';
 
 interface FileUploaderProps {
   onFileSelect: (file: File) => void;
   onStemsSelect?: (files: File[]) => void;
   onWaveformReady?: (waveform: number[]) => void;
   disabled?: boolean;
+  isProcessing?: boolean;
+  processingStatusLabel?: string;
+  processingProgress?: number;
 }
 
 export function FileUploader({
@@ -18,8 +23,10 @@ export function FileUploader({
   onStemsSelect,
   onWaveformReady,
   disabled = false,
+  isProcessing = false,
+  processingStatusLabel = 'Обработка...',
+  processingProgress = 0,
 }: FileUploaderProps) {
-  const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<AudioFileUpload | null>(null);
   const [showStemsUpload, setShowStemsUpload] = useState(false);
@@ -78,36 +85,6 @@ export function FileUploader({
     [onFileSelect, onWaveformReady, validateFile]
   );
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragging(false);
-      if (disabled) return;
-      const file = e.dataTransfer.files[0];
-      if (file) processFile(file);
-    },
-    [disabled, processFile]
-  );
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  }, []);
-
-  const handleInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) processFile(file);
-      e.target.value = '';
-    },
-    [processFile]
-  );
-
   const handleStemsInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files ?? []);
@@ -128,64 +105,38 @@ export function FileUploader({
       transition={{ duration: 0.6 }}
       className="w-full"
     >
-      <div
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        className={`rounded-2xl border-2 border-dashed p-12 transition-all duration-300 ${
-          isDragging
-            ? 'border-[#8A2BE2] bg-[#1A1A1A]'
-            : 'border-[#2A2A2A] bg-[#111111] hover:border-[#3A3A3A]'
-        } ${disabled ? 'pointer-events-none opacity-60' : ''}`}
-      >
-        <input
-          type="file"
+      <div>
+        <UploadDropzone
           accept=".mp3,.wav,.flac,.m4a,audio/*"
-          onChange={handleInputChange}
-          className="hidden"
-          id="file-upload"
-        />
-        <label
-          htmlFor="file-upload"
-          className="flex cursor-pointer flex-col items-center gap-4"
-        >
-          <div className="rounded-full bg-gradient-to-r from-[#8A2BE2] to-[#4B0082] p-4">
-            <svg
-              className="h-10 w-10 text-white"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          onFileSelect={processFile}
+          disabled={disabled}
+          title="Перетащите файл сюда или нажмите для выбора"
+          subtitle="Разделение на дорожки: Music, Vocal, Bass, Drums и другие"
+          formatsHint="MP3, WAV, FLAC, M4A — до 100 МБ"
+          emptyFooter={onStemsSelect ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                setShowStemsUpload(!showStemsUpload);
+                setError(null);
+              }}
+              className="mt-1 text-xs text-[#8A2BE2] hover:underline"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-              />
-            </svg>
-          </div>
-          <div className="text-center">
-            <p className="text-lg font-semibold text-[#E0E0E0]">
-              Перетащите файл сюда или нажмите для выбора
-            </p>
-            <p className="mt-1 text-[#A0A0A0]">
-              MP3, WAV, FLAC, M4A — до 100 МБ
-            </p>
-            {onStemsSelect && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setShowStemsUpload(!showStemsUpload);
-                  setError(null);
-                }}
-                className="mt-2 text-sm text-[#8A2BE2] hover:underline"
-              >
-                {showStemsUpload ? 'Скрыть' : 'Или загрузить готовые stems'}
-              </button>
-            )}
-          </div>
-        </label>
+              {showStemsUpload ? 'Скрыть' : 'Или загрузить готовые stems'}
+            </button>
+          ) : null}
+        />
+
+        {isProcessing && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mx-auto mt-6 max-w-2xl rounded-xl border border-[#2A2A2A] bg-[#0A0A0A] p-4"
+          >
+            <ProgressInlineBar value={processingProgress} label={processingStatusLabel} />
+          </motion.div>
+        )}
 
         {showStemsUpload && onStemsSelect && (
           <div className="mt-4 rounded-xl border border-[#2A2A2A] bg-[#0A0A0A] p-4">

@@ -5,51 +5,345 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Нотная запись</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&display=swap');
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, sans-serif; background: #0A0A0A; color: #E0E0E0; }
-    .at-wrap { display: flex; flex-direction: column; height: 100vh; min-height: 400px; }
+    *::-webkit-scrollbar { width: 10px; height: 10px; }
+    *::-webkit-scrollbar-thumb { background: #2f2f36; border-radius: 999px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    body {
+      margin: 0;
+      font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+      background:
+        radial-gradient(1300px 600px at 10% -10%, rgba(138,43,226,.18), transparent 60%),
+        radial-gradient(900px 500px at 100% 110%, rgba(59,130,246,.12), transparent 60%),
+        #0A0A0A;
+      color: #E0E0E0;
+    }
+    .at-wrap {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      min-height: 400px;
+      border-left: 1px solid #171717;
+      border-right: 1px solid #171717;
+      background: linear-gradient(180deg, #0f0f11 0%, #0b0b0c 100%);
+    }
+    .at-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 16px;
+      border-bottom: 1px solid #232327;
+      background: linear-gradient(180deg, rgba(26,26,30,.9), rgba(16,16,18,.9));
+      backdrop-filter: blur(8px);
+    }
+    .at-header-left { min-width: 0; }
+    .at-title { margin: 0; font-size: 13px; font-weight: 700; color: #F3F4F6; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .at-subtitle { margin: 2px 0 0; font-size: 11px; color: #9CA3AF; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .at-header-right { display: flex; align-items: center; gap: 8px; }
+    .at-chip {
+      border: 1px solid #2B2C31;
+      border-radius: 999px;
+      background: #121317;
+      color: #B8BBC4;
+      font-size: 11px;
+      padding: 4px 9px;
+      white-space: nowrap;
+    }
+    .at-chip strong { color: #E5E7EB; font-weight: 600; }
+    .at-fs-btn {
+      border: 1px solid #2B2C31;
+      border-radius: 999px;
+      background: #121317;
+      color: #B8BBC4;
+      font-size: 11px;
+      padding: 4px 9px;
+      cursor: pointer;
+      transition: all .18s ease;
+    }
+    .at-fs-btn:hover {
+      border-color: rgba(138,43,226,.6);
+      color: #E5E7EB;
+      background: rgba(138,43,226,.18);
+    }
     .at-content { flex: 1; position: relative; overflow: hidden; }
-    .at-sidebar { position: absolute; top: 0; left: 0; bottom: 0; width: 60px; background: #1A1A1A; border-right: 1px solid #2A2A2A; overflow: hidden; transition: width 0.2s; z-index: 10; }
-    .at-sidebar:hover { width: 260px; overflow-y: auto; }
-    .at-viewport { position: absolute; top: 0; left: 60px; right: 0; bottom: 0; overflow: auto; padding: 16px; background: #fff; }
-    .at-main { min-height: 100%; }
+    .at-sidebar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 86px;
+      background: linear-gradient(180deg, #18191d 0%, #131418 100%);
+      border-right: 1px solid #2A2A2A;
+      overflow: hidden;
+      transition: width 0.22s ease;
+      z-index: 10;
+      box-shadow: 4px 0 20px rgba(0,0,0,.25);
+    }
+    .at-sidebar:hover { width: 320px; overflow-y: auto; }
+    .at-viewport {
+      position: absolute;
+      top: 0;
+      left: 86px;
+      right: 0;
+      bottom: 0;
+      overflow: auto;
+      padding: 20px;
+      background:
+        radial-gradient(900px 400px at 85% -10%, rgba(138,43,226,.08), transparent 60%),
+        #0f1013;
+      transition: left .22s ease;
+    }
+    .at-sidebar:hover ~ .at-viewport { left: 320px; }
+    .at-main {
+      min-height: 100%;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 20px 60px rgba(0,0,0,.38);
+      padding: 10px;
+    }
     .at-overlay { position: absolute; inset: 0; z-index: 100; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; }
     .at-overlay-content { background: #111; border: 1px solid #2A2A2A; padding: 20px 24px; border-radius: 12px; color: #E0E0E0; display: flex; align-items: center; gap: 12px; }
     .at-overlay-content::before { content: ''; width: 20px; height: 20px; border: 3px solid #8A2BE2; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .at-track-list { padding: 8px; }
-    .at-track { padding: 8px 12px; margin: 4px 0; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
-    .at-track:hover { background: rgba(138,43,226,0.1); }
-    .at-track.active { background: rgba(138,43,226,0.2); }
+    .at-track-list { padding: 10px; }
+    .at-track {
+      padding: 10px 12px;
+      margin: 6px 0;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: all .18s ease;
+      background: rgba(255,255,255,.015);
+    }
+    .at-track:hover { background: rgba(138,43,226,0.08); border-color: rgba(138,43,226,.32); }
+    .at-track.active {
+      background: linear-gradient(135deg, rgba(138,43,226,.22), rgba(75,0,130,.13));
+      border-color: rgba(138,43,226,.45);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.05);
+    }
     .at-track-row { display: flex; align-items: center; gap: 10px; }
-    .at-track select { font-size: 11px; padding: 4px 6px; background: #2A2A2A; border: 1px solid #3A3A3A; color: #E0E0E0; border-radius: 6px; cursor: pointer; flex-shrink: 0; min-width: 0; }
+    .at-track select { font-size: 11px; padding: 5px 8px; background: #22242b; border: 1px solid #3A3A3A; color: #E0E0E0; border-radius: 8px; cursor: pointer; flex-shrink: 0; min-width: 0; }
     .at-track .at-track-instrument { width: 100%; margin-top: 4px; font-size: 11px; }
-    .at-track-icon { width: 36px; height: 36px; background: rgba(138,43,226,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #8A2BE2; flex-shrink: 0; }
+    .at-track-icon {
+      width: 36px;
+      height: 36px;
+      background: radial-gradient(circle at 30% 30%, rgba(138,43,226,.35), rgba(75,0,130,.18));
+      border: 1px solid rgba(138,43,226,.35);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #b78cff;
+      flex-shrink: 0;
+    }
     .at-track-icon svg { width: 18px; height: 18px; }
-    .at-track-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .at-track-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color:#ECEEF3; }
+    .at-track-sub { font-size: 11px; color:#8C90A0; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .at-track-controls { display: flex; align-items: center; gap: 6px; }
     .at-track-vol { flex: 1; min-width: 0; height: 6px; -webkit-appearance: none; background: #2A2A2A; border-radius: 3px; }
     .at-track-vol::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #8A2BE2; cursor: pointer; }
-    .at-track-btn { width: 24px; height: 24px; border: none; border-radius: 4px; background: #2A2A2A; color: #A0A0A0; font-size: 10px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .at-track-btn { width: 24px; height: 24px; border: none; border-radius: 6px; background: #2A2A2A; color: #A0A0A0; font-size: 10px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; }
     .at-track-btn:hover { background: #3A3A3A; color: #E0E0E0; }
     .at-track-btn.mute.active { background: #ef4444; color: #fff; }
     .at-track-btn.solo.active { background: #8A2BE2; color: #fff; }
-    .at-controls { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #1A1A1A; border-top: 1px solid #2A2A2A; flex-shrink: 0; }
-    .at-controls-left, .at-controls-right { display: flex; align-items: center; gap: 12px; }
-    .at-controls .btn { width: 44px; height: 44px; border: none; border-radius: 50%; background: transparent; color: #A0A0A0; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-    .at-controls .btn:hover:not(.disabled) { background: rgba(138,43,226,0.2); color: #E0E0E0; }
+    .at-sidebar:not(:hover) .at-track {
+      padding: 10px 8px;
+      align-items: center;
+      border-radius: 14px;
+      gap: 6px;
+    }
+    .at-sidebar:not(:hover) .at-track-row {
+      width: 100%;
+      justify-content: center;
+      gap: 0;
+    }
+    .at-sidebar:not(:hover) .at-track-row > div {
+      display: none;
+    }
+    .at-sidebar:not(:hover) .at-track-icon {
+      width: 40px;
+      height: 40px;
+      border-color: rgba(138,43,226,.5);
+      box-shadow: 0 0 12px rgba(138,43,226,.2);
+    }
+    .at-sidebar:not(:hover) .at-track select,
+    .at-sidebar:not(:hover) .at-track-controls,
+    .at-sidebar:not(:hover) .at-track-sub,
+    .at-sidebar:not(:hover) .at-track-name {
+      display: none;
+    }
+    .at-marker.section { cursor: pointer; }
+    .at-timeline-wrap {
+      padding: 8px 16px 10px;
+      border-top: 1px solid #232327;
+      border-bottom: 1px solid #232327;
+      background: linear-gradient(180deg, #16171b, #121317);
+    }
+    .at-timeline-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      font-size: 11px;
+      color: #8E93A4;
+    }
+    .at-timeline-sections {
+      position: relative;
+      height: 18px;
+      margin-bottom: 4px;
+      pointer-events: auto;
+    }
+    .at-section-label {
+      position: absolute;
+      top: 0;
+      transform: translateX(-50%);
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 10px;
+      line-height: 1;
+      color: #d6c3ff;
+      background: rgba(138,43,226,.16);
+      border: 1px solid rgba(138,43,226,.35);
+      border-radius: 999px;
+      padding: 3px 7px;
+      pointer-events: auto;
+      cursor: pointer;
+      transition: all .15s ease;
+    }
+    .at-section-label:hover {
+      background: rgba(138,43,226,.26);
+      border-color: rgba(138,43,226,.6);
+      color: #efe8ff;
+    }
+    .at-section-label.active {
+      background: linear-gradient(135deg, rgba(138,43,226,.55), rgba(75,0,130,.45));
+      border-color: rgba(176,117,255,.85);
+      color: #fff;
+      box-shadow: 0 0 14px rgba(138,43,226,.45);
+    }
+    .at-tooltip {
+      position: fixed;
+      z-index: 1200;
+      pointer-events: none;
+      opacity: 0;
+      transform: translate(-50%, -120%);
+      transition: opacity .12s ease;
+      background: rgba(17,17,20,.96);
+      border: 1px solid #3A3A42;
+      color: #E5E7EB;
+      border-radius: 10px;
+      padding: 6px 8px;
+      box-shadow: 0 8px 30px rgba(0,0,0,.35);
+      font-size: 11px;
+      line-height: 1.35;
+      white-space: pre-line;
+      max-width: 220px;
+    }
+    .at-tooltip.visible { opacity: 1; }
+    .at-timeline-rail {
+      position: relative;
+      height: 22px;
+      display: flex;
+      align-items: center;
+    }
+    .at-timeline-markers {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 3px;
+      height: 16px;
+      pointer-events: none;
+    }
+    .at-marker {
+      position: absolute;
+      top: 0;
+      width: 2px;
+      height: 12px;
+      background: rgba(255,255,255,.18);
+      border-radius: 999px;
+      transform: translateX(-50%);
+    }
+    .at-marker.section {
+      height: 16px;
+      background: rgba(138,43,226,.7);
+      box-shadow: 0 0 8px rgba(138,43,226,.45);
+    }
+    .at-marker.section.active {
+      background: #c79bff;
+      box-shadow: 0 0 14px rgba(199,155,255,.65);
+    }
+    .at-timeline {
+      width: 100%;
+      margin: 0;
+      -webkit-appearance: none;
+      height: 8px;
+      border-radius: 999px;
+      background: #282a31;
+      outline: none;
+      position: relative;
+      z-index: 2;
+    }
+    .at-timeline::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #8A2BE2;
+      border: 2px solid #d9c2ff;
+      box-shadow: 0 0 10px rgba(138,43,226,.45);
+      cursor: pointer;
+    }
+    .at-controls { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 16px; background: linear-gradient(180deg,#1A1A1A,#141414); border-top: 1px solid #2A2A2A; flex-shrink: 0; }
+    .at-controls-left, .at-controls-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .at-controls .btn { width: 42px; height: 42px; border: 1px solid #2A2A2A; border-radius: 999px; background: #111; color: #A0A0A0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .2s ease; }
+    .at-controls .btn:hover:not(.disabled) { border-color: rgba(138,43,226,.55); background: #1E1A26; color: #E0E0E0; transform: translateY(-1px); }
     .at-controls .btn.disabled { opacity: 0.4; cursor: not-allowed; }
-    .at-controls .btn.toggle.active { background: linear-gradient(135deg,#8A2BE2,#4B0082); color: #fff; }
+    .at-controls .btn.toggle.active { background: linear-gradient(135deg,#8A2BE2,#4B0082); border-color: #8A2BE2; color: #fff; box-shadow: 0 0 16px rgba(138,43,226,.35); }
     .at-controls .btn svg { width: 18px; height: 18px; fill: currentColor; }
+    .at-controls .btn.primary { width: 50px; height: 50px; background: linear-gradient(135deg,#8A2BE2,#4B0082); border-color: #8A2BE2; color: #fff; box-shadow: 0 0 18px rgba(138,43,226,.4); }
+    .at-controls .btn.primary:hover:not(.disabled) { filter: brightness(1.08); transform: translateY(-1px) scale(1.02); }
     .at-song-position { font-family: monospace; font-size: 12px; color: #A0A0A0; }
-    .at-controls select { background: #2A2A2A; border: 1px solid #3A3A3A; color: #E0E0E0; padding: 8px 12px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+    .at-controls select { background: #202020; border: 1px solid #3A3A3A; color: #E0E0E0; padding: 8px 10px; border-radius: 10px; font-size: 12px; cursor: pointer; }
+    .at-tempo { display: flex; align-items: center; gap: 6px; color: #A0A0A0; font-size: 11px; border: 1px solid #2A2A2A; background:#111; border-radius: 999px; padding: 4px 8px; }
+    .at-tempo input { width: 68px; background: #202020; border: 1px solid #3A3A3A; color: #E0E0E0; padding: 5px 8px; border-radius: 999px; font-size: 12px; }
+    .at-pill { border: 1px solid #2A2A2A; background:#111; border-radius: 999px; padding: 4px 8px; display:flex; align-items:center; gap:8px; }
+    .at-player-progress { font-size: 12px; color:#A0A0A0; min-width: 40px; text-align: center; }
     .at-cursor-bar { background: rgba(138,43,226,0.2); }
     .at-cursor-beat { background: #8A2BE2; width: 3px; }
     .at-highlight * { fill: #8A2BE2 !important; stroke: #8A2BE2 !important; }
+    @media (max-width: 900px) {
+      .at-sidebar { width: 64px; }
+      .at-sidebar:hover { width: 64px; }
+      .at-viewport { left: 64px; padding: 12px; }
+      .at-sidebar:hover ~ .at-viewport { left: 64px; }
+      .at-controls { padding: 10px 12px; }
+      .at-controls-left, .at-controls-right { gap: 8px; }
+      .at-song-position { font-size: 11px; }
+      .at-main { border-radius: 12px; }
+      .at-header { padding: 8px 12px; }
+    }
   </style>
 </head>
 <body>
   <div class="at-wrap">
+    <div class="at-header">
+      <div class="at-header-left">
+        <p class="at-title" id="headerTitle">Нотный просмотрщик</p>
+        <p class="at-subtitle" id="headerSubtitle">AlphaTab Studio View</p>
+      </div>
+      <div class="at-header-right">
+        <span class="at-chip">View: <strong id="chipLayout">Page</strong></span>
+        <span class="at-chip">Tempo: <strong id="chipTempo">120</strong></span>
+        <button id="fsBtn" class="at-fs-btn" type="button">Fullscreen</button>
+      </div>
+    </div>
     <div class="at-overlay" id="overlay">
       <div class="at-overlay-content">Загрузка нотной записи...</div>
     </div>
@@ -61,17 +355,31 @@
         <div class="at-main" id="main"></div>
       </div>
     </div>
+    <div class="at-timeline-wrap">
+      <div class="at-timeline-meta">
+        <span id="timelineLabel">Timeline</span>
+        <span id="timelinePercent">0%</span>
+      </div>
+      <div class="at-timeline-sections" id="timelineSections"></div>
+      <div class="at-timeline-rail">
+        <div class="at-timeline-markers" id="timelineMarkers"></div>
+        <input id="timeline" class="at-timeline" type="range" min="0" max="1000" value="0" step="1" />
+      </div>
+    </div>
     <div class="at-controls">
       <div class="at-controls-left">
-        <button class="btn at-player-play-pause disabled" id="playBtn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+        <button class="btn primary at-player-play-pause disabled" id="playBtn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
         <button class="btn at-player-stop disabled" id="stopBtn"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"/></svg></button>
         <span class="at-player-progress" id="progress">0%</span>
-        <button class="btn toggle at-count-in" id="countIn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></button>
-        <button class="btn toggle at-metronome" id="metronome"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></button>
-        <button class="btn toggle at-loop" id="loop"><svg viewBox="0 0 24 24"><path d="M17 1v4h4M7 23v-4H3M3 12a9 9 0 0118 0 9 9 0 01-18 0z"/><path d="M21 12a9 9 0 01-9 9"/></svg></button>
+        <div class="at-pill">
+          <button class="btn toggle at-count-in" id="countIn" title="Count In"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></button>
+          <button class="btn toggle at-metronome" id="metronome" title="Метроном"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></button>
+          <button class="btn toggle at-loop" id="loop" title="Loop"><svg viewBox="0 0 24 24"><path d="M17 1v4h4M7 23v-4H3M3 12a9 9 0 0118 0 9 9 0 01-18 0z"/><path d="M21 12a9 9 0 01-9 9"/></svg></button>
+        </div>
         <span class="at-song-position" id="position">00:00 / 00:00</span>
       </div>
       <div class="at-controls-right">
+        <label class="at-tempo">BPM <input type="number" id="tempoInput" min="20" max="300" step="1" /></label>
         <select id="zoom"><option value="25">25%</option><option value="50">50%</option><option value="75">75%</option><option value="90">90%</option><option value="100" selected>100%</option><option value="110">110%</option><option value="125">125%</option><option value="150">150%</option><option value="200">200%</option></select>
         <select id="layout"><option value="page" selected>Page</option><option value="horizontal">Horizontal</option></select>
         <svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:#A0A0A0"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
@@ -88,6 +396,7 @@
 
     const overlay = document.getElementById('overlay');
     const overlayContent = overlay.querySelector('.at-overlay-content');
+    let hasLoadedScore = false;
 
     function showError(msg) {
       overlayContent.textContent = msg;
@@ -97,12 +406,27 @@
 
     const params = new URLSearchParams(location.search);
     let fileUrl = params.get('file');
-    const requestedBpm = parseFloat(params.get('tempo') || '0');
-    const baseBpm = parseFloat(params.get('baseTempo') || '0');
+    const fileNameParam = params.get('fileName');
+    let requestedBpm = parseFloat(params.get('tempo') || '0');
+    let baseBpm = parseFloat(params.get('baseTempo') || '0');
+    let trackMeta = [];
+    try {
+      trackMeta = JSON.parse(params.get('trackMeta') || '[]');
+      if (!Array.isArray(trackMeta)) trackMeta = [];
+    } catch {
+      trackMeta = [];
+    }
     if (!fileUrl) {
       fileUrl = BASE + 'sample.xml';
       overlayContent.textContent = 'Загрузка тестового файла...';
     }
+    try {
+      var headerTitle = document.getElementById('headerTitle');
+      var cleanName = fileNameParam
+        ? decodeURIComponent(fileNameParam)
+        : decodeURIComponent((fileUrl || '').split('/').pop() || 'Нотный просмотрщик');
+      if (cleanName) headerTitle.textContent = cleanName;
+    } catch (_) {}
 
     const loadTimeout = setTimeout(() => {
       showError('Таймаут загрузки. Попробуйте меньший файл или обновите страницу.');
@@ -157,7 +481,14 @@
       clearTimeout(loadTimeout);
       var msg = (e && e.message) ? String(e.message) : String(e);
       if (msg.indexOf("staves") !== -1) {
-        console.warn('AlphaTab staves error (ignored):', msg);
+        console.warn('AlphaTab staves error:', msg);
+        // If score is already loaded, this can be a transient render glitch.
+        // If score has not loaded yet, surface a real error instead of dark screen.
+        if (hasLoadedScore) {
+          overlay.style.display = 'none';
+        } else {
+          showError('Не удалось отобразить ноты. Попробуйте другой файл или экспорт в MusicXML.');
+        }
         return;
       }
       showError('Ошибка: ' + msg);
@@ -168,9 +499,34 @@
       const base = baseBpm > 0 ? baseBpm : (api.score && api.score.tempo > 0 ? api.score.tempo : 120);
       const speed = requestedBpm / base;
       api.playbackSpeed = Math.max(0.125, Math.min(8, speed));
+      const tempoInput = document.getElementById('tempoInput');
+      if (tempoInput) tempoInput.value = String(Math.max(20, Math.min(300, Math.round(requestedBpm))));
+      var chipTempo = document.getElementById('chipTempo');
+      if (chipTempo) chipTempo.textContent = String(Math.max(20, Math.min(300, Math.round(requestedBpm))));
+    }
+
+    function profileByInstrument(instrument) {
+      const name = String(instrument || '').toLowerCase();
+      if (name.includes('guitar') || name.includes('гитар') || name.includes('bass') || name.includes('бас')) {
+        return 'scoretab';
+      }
+      return 'score';
     }
 
     const playBtn = document.getElementById('playBtn');
+    const fsBtn = document.getElementById('fsBtn');
+    const timeline = document.getElementById('timeline');
+    const timelinePercent = document.getElementById('timelinePercent');
+    const timelineMarkers = document.getElementById('timelineMarkers');
+    const timelineSections = document.getElementById('timelineSections');
+    let isTimelineSeeking = false;
+    let lastKnownEndTick = 0;
+    let lastKnownEndTimeMs = 0;
+    let sectionRanges = [];
+    let activeSectionIdx = -1;
+    const timelineTooltip = document.createElement('div');
+    timelineTooltip.className = 'at-tooltip';
+    document.body.appendChild(timelineTooltip);
     const playIcon = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
     const pauseIcon = '<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
 
@@ -246,6 +602,150 @@
 
     const trackStates = { volumes: {}, mutes: {}, solos: {} };
 
+    function renderTimelineMarkers(score) {
+      if (!timelineMarkers) return;
+      timelineMarkers.innerHTML = '';
+      if (timelineSections) timelineSections.innerHTML = '';
+      sectionRanges = [];
+      activeSectionIdx = -1;
+      const bars = (score && score.masterBars) ? score.masterBars : [];
+      if (!bars || bars.length < 2) return;
+      const len = bars.length;
+      const maxSimple = Math.min(24, len);
+      for (let i = 0; i < maxSimple; i++) {
+        const marker = document.createElement('span');
+        marker.className = 'at-marker';
+        const p = len <= 1 ? 0 : (i / (maxSimple - 1)) * 100;
+        marker.style.left = p + '%';
+        timelineMarkers.appendChild(marker);
+      }
+      const sectionLabels = [];
+      for (let i = 0; i < len; i++) {
+        const bar = bars[i];
+        const sectionLabel = bar && bar.section && (bar.section.text || bar.section.marker);
+        if (!sectionLabel) continue;
+        const text = String(sectionLabel).trim();
+        if (!text) continue;
+        const marker = document.createElement('span');
+        marker.className = 'at-marker section';
+        const p = len <= 1 ? 0 : (i / (len - 1)) * 100;
+        marker.style.left = p + '%';
+        marker.title = text;
+        attachTimelineTooltip(marker, text, i + 1, p);
+        timelineMarkers.appendChild(marker);
+        sectionLabels.push({ text: text, percent: p, barIndex: i, markerEl: marker });
+      }
+
+      if (!timelineSections || sectionLabels.length === 0) return;
+      let lastPlaced = -999;
+      let lastText = '';
+      for (const item of sectionLabels) {
+        if (item.text === lastText && Math.abs(item.percent - lastPlaced) < 8) continue;
+        if (Math.abs(item.percent - lastPlaced) < 10) continue;
+        const label = document.createElement('span');
+        label.className = 'at-section-label';
+        label.style.left = item.percent + '%';
+        label.textContent = item.text;
+        const idx = sectionRanges.length;
+        item.markerEl.dataset.sectionIdx = String(idx);
+        label.dataset.sectionIdx = String(idx);
+        attachTimelineTooltip(label, item.text, item.barIndex + 1, item.percent);
+        timelineSections.appendChild(label);
+        sectionRanges.push({
+          text: item.text,
+          percent: item.percent,
+          barIndex: item.barIndex,
+          markerEl: item.markerEl,
+          labelEl: label,
+        });
+        lastPlaced = item.percent;
+        lastText = item.text;
+      }
+      for (let i = 0; i < sectionRanges.length; i++) {
+        const current = sectionRanges[i];
+        const next = sectionRanges[i + 1];
+        current.startPercent = current.percent;
+        current.endPercent = next ? next.percent : 100;
+      }
+      updateActiveSectionByPercent(0);
+    }
+
+    function updateActiveSectionByPercent(percent) {
+      if (!sectionRanges || sectionRanges.length === 0) return;
+      const clamped = Math.max(0, Math.min(100, percent));
+      let idx = sectionRanges.findIndex((s) => clamped >= s.startPercent && clamped < s.endPercent);
+      if (idx < 0) idx = sectionRanges.length - 1;
+      if (idx === activeSectionIdx) return;
+      activeSectionIdx = idx;
+      sectionRanges.forEach((s, i) => {
+        const active = i === idx;
+        if (s.markerEl) s.markerEl.classList.toggle('active', active);
+        if (s.labelEl) s.labelEl.classList.toggle('active', active);
+      });
+      const activeSection = sectionRanges[idx];
+      const timelineLabel = document.getElementById('timelineLabel');
+      if (timelineLabel && activeSection?.text) {
+        timelineLabel.textContent = 'Timeline · ' + activeSection.text;
+      }
+    }
+
+    function formatTimeForTooltip(ms) {
+      if (!(ms >= 0) || !Number.isFinite(ms)) return '—';
+      const total = Math.floor(ms / 1000);
+      const minutes = Math.floor(total / 60);
+      const seconds = total % 60;
+      const tenths = Math.floor((ms % 1000) / 100);
+      return String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0') + '.' + String(tenths);
+    }
+
+    function tooltipText(sectionName, barNo, percent) {
+      const approxMs = lastKnownEndTimeMs > 0 ? (percent / 100) * lastKnownEndTimeMs : NaN;
+      return 'Секция: ' + sectionName + '\nТакт: ' + barNo + '\nВремя: ' + formatTimeForTooltip(approxMs);
+    }
+
+    function showTimelineTooltip(text, x, y) {
+      if (!timelineTooltip) return;
+      timelineTooltip.textContent = text;
+      timelineTooltip.style.left = x + 'px';
+      timelineTooltip.style.top = y + 'px';
+      timelineTooltip.classList.add('visible');
+    }
+
+    function hideTimelineTooltip() {
+      if (!timelineTooltip) return;
+      timelineTooltip.classList.remove('visible');
+    }
+
+    function attachTimelineTooltip(el, sectionName, barNo, percent) {
+      el.addEventListener('mouseenter', (ev) => {
+        showTimelineTooltip(tooltipText(sectionName, barNo, percent), ev.clientX, ev.clientY - 8);
+      });
+      el.addEventListener('mousemove', (ev) => {
+        showTimelineTooltip(tooltipText(sectionName, barNo, percent), ev.clientX, ev.clientY - 8);
+      });
+      el.addEventListener('mouseleave', hideTimelineTooltip);
+      el.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (lastKnownEndTick > 0) {
+          const ratio = Math.max(0, Math.min(1, percent / 100));
+          api.tickPosition = Math.round(lastKnownEndTick * ratio);
+          if (timeline) timeline.value = String(Math.round(ratio * 1000));
+          if (timelinePercent) timelinePercent.textContent = Math.round(ratio * 100) + '%';
+          updateActiveSectionByPercent(ratio * 100);
+        }
+      });
+    }
+
+    function seekToRatio(ratio) {
+      if (!(lastKnownEndTick > 0)) return;
+      const clamped = Math.max(0, Math.min(1, ratio));
+      api.tickPosition = Math.round(lastKnownEndTick * clamped);
+      if (timeline) timeline.value = String(Math.max(0, Math.min(1000, Math.round(clamped * 1000))));
+      if (timelinePercent) timelinePercent.textContent = Math.round(clamped * 100) + '%';
+      updateActiveSectionByPercent(clamped * 100);
+    }
+
     function applyTrackVolumes() {
       if (!api.trackVolumes || !api.score || !api.score.tracks) return;
       const vols = api.trackVolumes.slice();
@@ -262,11 +762,24 @@
     }
 
     api.scoreLoaded.on((score) => {
+      hasLoadedScore = true;
+      // Fallback: ensure UI is visible even if renderFinished did not fire.
+      overlay.style.display = 'none';
+      if (!(requestedBpm > 0) && score && score.tempo > 0) {
+        baseBpm = score.tempo;
+        var tempoInput = document.getElementById('tempoInput');
+        if (tempoInput) tempoInput.value = String(Math.round(score.tempo));
+        var chipTempo = document.getElementById('chipTempo');
+        if (chipTempo) chipTempo.textContent = String(Math.round(score.tempo));
+      }
       setTimeout(applyRequestedPlaybackTempo, 50);
+      renderTimelineMarkers(score);
       trackList.innerHTML = '';
+      let shouldReloadMidi = false;
       (score.tracks || []).forEach((track) => {
         if (!track) return;
         const idx = track.index;
+        const meta = trackMeta[idx] || {};
         trackStates.volumes[idx] = 1;
         trackStates.mutes[idx] = false;
         trackStates.solos[idx] = false;
@@ -282,12 +795,15 @@
           o.textContent = opt.label;
           select.appendChild(o);
         });
+        const defaultProfile = profileByInstrument(meta.instrument || track.name);
+        select.value = defaultProfile;
         select.onchange = (e) => {
           e.stopPropagation();
           applyTrackProfile(idx, select.value);
         };
         select.onclick = (e) => e.stopPropagation();
-        el.innerHTML = '<div class="at-track-row"><div class="at-track-icon">' + trackIcon + '</div><div class="at-track-name">' + track.name + '</div></div>';
+        var subName = meta.instrument ? String(meta.instrument) : ('Track #' + (idx + 1));
+        el.innerHTML = '<div class="at-track-row"><div class="at-track-icon">' + trackIcon + '</div><div><div class="at-track-name">' + track.name + '</div><div class="at-track-sub">' + subName + '</div></div></div>';
         el.appendChild(select);
 
         const instrumentSelect = document.createElement('select');
@@ -298,7 +814,12 @@
           o.value = i;
           o.textContent = GM_NAMES.get(i) || ('Program ' + i);
           if (track.playbackInfo && track.playbackInfo.program === i) o.selected = true;
+          if (typeof meta.program === 'number' && meta.program === i) o.selected = true;
           instrumentSelect.appendChild(o);
+        }
+        if (typeof meta.program === 'number' && track.playbackInfo && track.playbackInfo.program !== meta.program) {
+          track.playbackInfo.program = meta.program;
+          shouldReloadMidi = true;
         }
         instrumentSelect.onchange = (e) => {
           e.stopPropagation();
@@ -360,7 +881,14 @@
           if (tr) api.renderTracks([tr]);
         };
         trackList.appendChild(el);
+
+        applyTrackProfile(idx, defaultProfile);
       });
+      if (shouldReloadMidi) {
+        api.stop();
+        api.loadMidiForScore();
+        setTimeout(applyRequestedPlaybackTempo, 0);
+      }
     });
 
     api.renderStarted.on(() => {
@@ -375,6 +903,8 @@
     playBtn.onclick = () => { if (!playBtn.classList.contains('disabled')) api.playPause(); };
     stopBtn.onclick = () => api.stop();
     api.playerReady.on(() => {
+      // Extra safety for rare AlphaTab render lifecycle glitches.
+      overlay.style.display = 'none';
       setTimeout(applyRequestedPlaybackTempo, 100);
       playBtn.classList.remove('disabled');
       stopBtn.classList.remove('disabled');
@@ -391,6 +921,17 @@
         return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
       };
       document.getElementById('position').textContent = fmt(e.currentTime) + ' / ' + fmt(e.endTime);
+      if (Number.isFinite(e.endTick) && e.endTick > 0) lastKnownEndTick = e.endTick;
+      if (Number.isFinite(e.endTime) && e.endTime > 0) lastKnownEndTimeMs = e.endTime;
+      if (!isTimelineSeeking && timeline) {
+        const ratio = e.endTime > 0 ? (e.currentTime / e.endTime) : 0;
+        timeline.value = String(Math.max(0, Math.min(1000, Math.round(ratio * 1000))));
+      }
+      if (timelinePercent) {
+        const ratio = e.endTime > 0 ? (e.currentTime / e.endTime) : 0;
+        timelinePercent.textContent = Math.round(ratio * 100) + '%';
+        updateActiveSectionByPercent(ratio * 100);
+      }
     });
 
     api.soundFontLoad.on((e) => {
@@ -419,11 +960,136 @@
       api.settings.display.layoutMode = e.target.value === 'horizontal' ? alphaTab.LayoutMode.Horizontal : alphaTab.LayoutMode.Page;
       api.updateSettings();
       api.render();
+      var chipLayout = document.getElementById('chipLayout');
+      if (chipLayout) chipLayout.textContent = e.target.value === 'horizontal' ? 'Horizontal' : 'Page';
     };
     document.getElementById('masterVol').oninput = (e) => {
       api.masterVolume = parseInt(e.target.value)/100;
       document.getElementById('volVal').textContent = e.target.value + '%';
     };
+
+    const tempoInput = document.getElementById('tempoInput');
+    if (tempoInput) {
+      tempoInput.value = String(Math.max(20, Math.min(300, Math.round(requestedBpm > 0 ? requestedBpm : (baseBpm > 0 ? baseBpm : 120)))));
+      tempoInput.onchange = (e) => {
+        const value = parseFloat(e.target.value || '0');
+        if (!(value > 0)) return;
+        requestedBpm = Math.max(20, Math.min(300, value));
+        applyRequestedPlaybackTempo();
+      };
+    }
+
+    if (timeline) {
+      let pendingSeekRatio = null;
+      let seekRaf = 0;
+      const requestLiveSeek = (ratio) => {
+        pendingSeekRatio = ratio;
+        if (seekRaf) return;
+        seekRaf = requestAnimationFrame(() => {
+          seekRaf = 0;
+          if (pendingSeekRatio == null) return;
+          seekToRatio(pendingSeekRatio);
+        });
+      };
+      timeline.addEventListener('pointerdown', () => {
+        isTimelineSeeking = true;
+      });
+      timeline.addEventListener('pointerup', () => {
+        isTimelineSeeking = false;
+        const ratio = parseFloat(timeline.value || '0') / 1000;
+        if (Number.isFinite(ratio)) seekToRatio(ratio);
+      });
+      timeline.addEventListener('input', () => {
+        const ratio = parseFloat(timeline.value || '0') / 1000;
+        if (!Number.isFinite(ratio)) return;
+        requestLiveSeek(ratio);
+      });
+      timeline.addEventListener('change', () => {
+        const ratio = parseFloat(timeline.value || '0') / 1000;
+        if (!Number.isFinite(ratio)) return;
+        seekToRatio(ratio);
+      });
+    }
+
+    function shouldIgnoreHotkeyTarget(target) {
+      if (!target) return false;
+      const tag = String(target.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+      if (target.isContentEditable) return true;
+      return false;
+    }
+
+    window.addEventListener('keydown', (event) => {
+      if (!api) return;
+      if (shouldIgnoreHotkeyTarget(event.target)) return;
+      if (event.repeat) return;
+
+      if (event.code === 'Space') {
+        event.preventDefault();
+        playBtn?.click();
+        return;
+      }
+
+      if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
+        const seekStepRatio = lastKnownEndTimeMs > 0 ? (5000 / lastKnownEndTimeMs) : 0;
+        if (!(seekStepRatio > 0)) return;
+        event.preventDefault();
+        const currentRatio = timeline ? (parseFloat(timeline.value || '0') / 1000) : 0;
+        const direction = event.code === 'ArrowRight' ? 1 : -1;
+        seekToRatio(currentRatio + direction * seekStepRatio);
+        return;
+      }
+
+      if (event.code === 'KeyM') {
+        event.preventDefault();
+        document.getElementById('metronome')?.click();
+        return;
+      }
+
+      if (event.code === 'KeyL') {
+        event.preventDefault();
+        document.getElementById('loop')?.click();
+        return;
+      }
+
+      if (event.code === 'KeyC') {
+        event.preventDefault();
+        document.getElementById('countIn')?.click();
+      }
+    });
+
+    window.addEventListener('message', (event) => {
+      const data = event && event.data ? event.data : null;
+      if (!data || typeof data !== 'object') return;
+      if (data.type !== 'setTempo') return;
+      const nextTempo = parseFloat(String(data.tempo ?? '0'));
+      const nextBase = parseFloat(String(data.baseTempo ?? '0'));
+      if (nextBase > 0) baseBpm = nextBase;
+      if (nextTempo > 0) {
+        requestedBpm = Math.max(20, Math.min(300, nextTempo));
+        applyRequestedPlaybackTempo();
+      }
+    });
+
+    async function toggleFullscreenFromIframe() {
+      const root = document.documentElement;
+      if (!document.fullscreenElement) {
+        await root.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    }
+
+    if (fsBtn) {
+      fsBtn.addEventListener('click', () => {
+        void toggleFullscreenFromIframe();
+      });
+      const syncFsLabel = () => {
+        fsBtn.textContent = document.fullscreenElement ? 'Windowed' : 'Fullscreen';
+      };
+      document.addEventListener('fullscreenchange', syncFsLabel);
+      syncFsLabel();
+    }
   </script>
 </body>
 </html>

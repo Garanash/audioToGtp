@@ -17,3 +17,11 @@ CACHE_KEY_PREFIX = "sep:v1:"
 INPUT_KEY_PREFIX = "input:"
 RESULT_KEY_PREFIX = "result:"
 STATUS_KEY_PREFIX = "status:"
+
+MIDI_INPUT_KEY_PREFIX = "midi:input:"
+MIDI_RESULT_KEY_PREFIX = "midi:result:"
+MIDI_STATUS_KEY_PREFIX = "midi:status:"
+
+GTP_INPUT_KEY_PREFIX = "gtp:input:"
+GTP_RESULT_KEY_PREFIX = "gtp:result:"
+GTP_STATUS_KEY_PREFIX = "gtp:status:"

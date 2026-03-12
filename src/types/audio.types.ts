@@ -51,12 +51,14 @@ export interface MidiNote {
   startTime: number;
   endTime: number;
   velocity: number;
+  confidence?: number;
 }
 
 export interface MidiTrackData {
   instrument: StemType;
   notes: MidiNote[];
   program?: number;
+  qualityScore?: number;
 }
 
 export type ProcessingStatus =

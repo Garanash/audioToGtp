@@ -34,6 +34,7 @@ export function getWaveform(audioBuffer: AudioBuffer): number[] {
 
 export const BASIC_PITCH_SAMPLE_RATE = 22050;
 export const DEMUCS_SAMPLE_RATE = 44100;
+export const DEMUCS_FAST_SAMPLE_RATE = 32000;
 
 function createMonoFromStereo(audioBuffer: AudioBuffer): Float32Array {
   const left = audioBuffer.getChannelData(0);
@@ -136,6 +137,45 @@ export function resampleTo44100Stereo(audioBuffer: AudioBuffer): AudioBuffer {
     2,
     resampledLeft.length,
     DEMUCS_SAMPLE_RATE
+  );
+  buffer.copyToChannel(new Float32Array(resampledLeft), 0);
+  buffer.copyToChannel(new Float32Array(resampledRight), 1);
+  return buffer;
+}
+
+/**
+ * Ресемплирует AudioBuffer в стерео с заданной частотой
+ */
+export function resampleToStereo(audioBuffer: AudioBuffer, targetSampleRate: number): AudioBuffer {
+  const safeRate = Math.max(8000, Math.floor(targetSampleRate));
+  if (
+    audioBuffer.sampleRate === safeRate &&
+    audioBuffer.numberOfChannels === 2
+  ) {
+    return audioBuffer;
+  }
+
+  const left = audioBuffer.getChannelData(0);
+  const right =
+    audioBuffer.numberOfChannels > 1
+      ? audioBuffer.getChannelData(1)
+      : left;
+  const resampledLeft = resampleFloatArray(
+    left,
+    audioBuffer.sampleRate,
+    safeRate
+  );
+  const resampledRight = resampleFloatArray(
+    right,
+    audioBuffer.sampleRate,
+    safeRate
+  );
+
+  const ctx = new AudioContext({ sampleRate: safeRate });
+  const buffer = ctx.createBuffer(
+    2,
+    resampledLeft.length,
+    safeRate
   );
   buffer.copyToChannel(new Float32Array(resampledLeft), 0);
   buffer.copyToChannel(new Float32Array(resampledRight), 1);

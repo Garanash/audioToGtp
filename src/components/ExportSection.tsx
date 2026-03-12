@@ -18,6 +18,7 @@ interface ExportSectionProps {
   onExportGtp: () => Promise<unknown>;
   onExportMidi: () => void;
   gtpError?: string | null;
+  embedded?: boolean;
 }
 
 export function ExportSection({
@@ -27,6 +28,7 @@ export function ExportSection({
   onExportGtp,
   onExportMidi,
   gtpError,
+  embedded = false,
 }: ExportSectionProps) {
   const stemKeys = (['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'] as StemType[]).filter(
     (k) => stems[k]
@@ -43,13 +45,15 @@ export function ExportSection({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-2xl border border-[#2A2A2A] bg-[#111111] p-8"
+      className={embedded
+        ? 'rounded-2xl border border-[#2A2A2A] bg-[#111111] p-4'
+        : 'rounded-2xl border border-[#2A2A2A] bg-[#111111] p-8'}
     >
-      <h3 className="mb-6 text-xl font-bold text-[#E0E0E0]">
+      <h3 className={`${embedded ? 'mb-4 text-base' : 'mb-6 text-xl'} font-bold text-[#E0E0E0]`}>
         Выгрузка файлов
       </h3>
 
-      <div className="space-y-6">
+      <div className={embedded ? 'space-y-4' : 'space-y-6'}>
         <div>
           <h4 className="mb-3 font-medium text-[#A0A0A0]">Дорожки (WAV)</h4>
           <div className="flex flex-wrap gap-2">

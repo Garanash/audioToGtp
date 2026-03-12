@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.idea
+.cursor
+**/__pycache__
+**/*.pyc
+terminals
+agent-transcripts

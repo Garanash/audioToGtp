@@ -60,9 +60,9 @@ export const MADE_FOR_CARDS: MegaDropdownCard[] = [
   {
     id: 'bass',
     title: 'Басисты',
-    description: 'Отдельный бас из микса и конвертация в MIDI.',
+    description: 'Отдельный бас из микса и конвертация в GTP.',
     href: '#conversion',
-    ctaText: 'В MIDI',
+    ctaText: 'В GTP',
     icon: <IconBass />,
     gradient: 'bg-gradient-to-br from-blue-500/20 to-indigo-600/20',
     imageUrl: MADE_FOR_IMAGES.bass,
@@ -91,8 +91,8 @@ export const FEATURES_CARDS: MegaDropdownCard[] = [
   },
   {
     id: 'conversion',
-    title: 'Конвертация в MIDI',
-    description: 'Превращайте стемы в MIDI-дорожки для редакторов и секвенсоров.',
+    title: 'Конвертация в GTP',
+    description: 'Превращайте стемы в табы и ноты Guitar Pro (.gp5).',
     href: '#conversion',
     ctaText: 'Конвертировать',
     icon: <IconMidi />,

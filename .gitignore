@@ -38,3 +38,9 @@ __pycache__
 *.pyc
 separated
 separated_demucs
+
+# Библиотека табулатур (локальная, не в репо)
+gtp_tabs/
+
+# Локальные данные сервера
+server/data/

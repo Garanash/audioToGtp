@@ -1,9 +1,12 @@
 import { motion } from 'framer-motion';
+import { ProgressInlineBar } from './common/ProgressInlineBar';
 
 const STATUS_LABELS: Record<string, string> = {
+  preparing: 'Подготовка файла...',
+  analyzing: 'Определение тональности и темпа...',
   'loading-model': 'Загрузка модели...',
   separating: 'Разделение на инструменты...',
-  converting: 'Конвертация в MIDI...',
+  converting: 'Конвертация в GTP...',
   ready: 'Готово!',
   error: 'Ошибка',
 };
@@ -26,6 +29,38 @@ export function ProcessingStatus({
   usedFallback,
 }: ProcessingStatusProps) {
   if (status === 'idle') return null;
+  const isProcessing =
+    status === 'preparing' ||
+    status === 'analyzing' ||
+    status === 'loading-model' ||
+    status === 'separating' ||
+    status === 'converting';
+
+  if (isProcessing) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 z-[88] flex items-center justify-center bg-[#0A0A0A]/55 backdrop-blur-[2px]"
+      >
+        <div className="w-full max-w-md px-4">
+          <div className="rounded-2xl border border-[#2A2A2A] bg-[#111111]/95 p-5 shadow-2xl">
+            <div className="mb-3 flex items-center gap-3">
+              <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#8A2BE2] border-t-transparent" />
+              <p className="text-sm font-medium text-[#E0E0E0]">{STATUS_LABELS[status] ?? status}</p>
+            </div>
+            <ProgressInlineBar value={progress} />
+            {downloadProgress > 0 && downloadProgress < 100 && (
+              <p className="mt-2 text-right text-[11px] text-[#7F7F7F]">
+                Скачивание модели: {downloadProgress.toFixed(0)}%
+              </p>
+            )}
+            {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -73,25 +108,6 @@ export function ProcessingStatus({
                 {usedFallback ? '⚠ Качество разделения' : '💡 Совет'}
               </p>
               <p className="mt-1">{separationWarning}</p>
-            </div>
-          )}
-          {(status === 'loading-model' ||
-            status === 'separating' ||
-            status === 'converting') && (
-            <div className="mt-3 space-y-2">
-              {downloadProgress > 0 && downloadProgress < 100 && (
-                <p className="text-sm text-[#A0A0A0]">
-                  Скачивание модели: {downloadProgress.toFixed(0)}%
-                </p>
-              )}
-              <div className="h-2 overflow-hidden rounded-full bg-[#2A2A2A]">
-                <motion.div
-                  className="h-full rounded-full bg-gradient-to-r from-[#8A2BE2] to-[#4B0082]"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${progress}%` }}
-                  transition={{ duration: 0.3 }}
-                />
-              </div>
             </div>
           )}
         </div>
