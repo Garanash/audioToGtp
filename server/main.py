@@ -40,6 +40,7 @@ try:
     from config import (
         CACHE_KEY_PREFIX,
         CACHE_TTL_SECONDS,
+        ERROR_KEY_PREFIX,
         GTP_INPUT_KEY_PREFIX,
         GTP_RESULT_KEY_PREFIX,
         GTP_STATUS_KEY_PREFIX,
@@ -47,6 +48,7 @@ try:
         MIDI_INPUT_KEY_PREFIX,
         MIDI_RESULT_KEY_PREFIX,
         MIDI_STATUS_KEY_PREFIX,
+        PROGRESS_KEY_PREFIX,
         RESULT_KEY_PREFIX,
         STATUS_KEY_PREFIX,
         REDIS_URL,
@@ -65,6 +67,13 @@ except ImportError:
     AUTH_AVAILABLE = False
 
 app = FastAPI(title="Audio Separation API")
+
+try:
+    from auth_oauth import router as auth_router
+    app.include_router(auth_router)
+except ImportError:
+    pass
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -200,7 +209,7 @@ def _input_to_wav_bytes(in_path: Path) -> bytes:
 
 def _separate_sync(content: bytes, ext: str) -> dict[str, str]:
     """Синхронное разделение аудио в памяти. Возвращает { stem_name: base64 }.
-    При ошибке Demucs возвращает одну дорожку "other" (оригинал в WAV), чтобы работала конвертация в MIDI.
+    При ошибке Demucs возвращает 500 — без fallback на «оригинал», чтобы не показывать ложные стемы.
     """
     workdir = Path(tempfile.mkdtemp())
     input_path = workdir / "input"
@@ -227,13 +236,13 @@ def _separate_sync(content: bytes, ext: str) -> dict[str, str]:
             if p.exists():
                 result[name] = base64.b64encode(p.read_bytes()).decode("ascii")
         if len(result) < 2:
-            raise ValueError("Demucs не вернул stems")
+            raise ValueError("Demucs не вернул достаточно дорожек")
         return result
+    except HTTPException:
+        raise
     except Exception as e:
-        wav_bytes = _input_to_wav_bytes(in_file) if in_file.exists() else None
-        if wav_bytes:
-            return {"other": base64.b64encode(wav_bytes).decode("ascii")}
-        raise HTTPException(500, str(e)[:400])
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise HTTPException(500, f"Ошибка разделения: {str(e)[:400]}")
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
@@ -422,11 +431,13 @@ if _GTP_ROUTES_AVAILABLE:
                 task_id = str(uuid.uuid4())
                 input_key = f"{GTP_INPUT_KEY_PREFIX}{task_id}"
                 status_key = f"{GTP_STATUS_KEY_PREFIX}{task_id}"
+                progress_key = f"{PROGRESS_KEY_PREFIX}{task_id}"
                 r.setex(input_key, 3600, body.model_dump_json().encode("utf-8"))
                 r.setex(status_key, 3600, b"pending")
+                r.setex(progress_key, 3600, b"5")
                 from tasks import run_gtp_conversion
                 run_gtp_conversion.delay(task_id)
-                return {"taskId": task_id, "status": "pending"}
+                return {"taskId": task_id, "status": "pending", "progress": 5}
             except Exception:
                 pass
         try:
@@ -454,8 +465,10 @@ def convert_to_gtp_status(task_id: str):
     status_key = f"{GTP_STATUS_KEY_PREFIX}{task_id}"
     raw = r.get(status_key)
     if not raw:
-        return {"taskId": task_id, "status": "unknown"}
-    return {"taskId": task_id, "status": raw.decode("utf-8")}
+        return {"taskId": task_id, "status": "unknown", "progress": 5}
+    status_str = raw.decode("utf-8")
+    progress = _get_progress(r, task_id, status_str)
+    return {"taskId": task_id, "status": status_str, "progress": progress}
 
 
 @app.get("/convert-to-gtp/result/{task_id}")
@@ -529,13 +542,15 @@ async def separate(
                 "ext": ext,
                 "contentHash": content_hash,
             }
+            progress_key = f"{PROGRESS_KEY_PREFIX}{task_id}"
             r.setex(input_key, 3600, json.dumps(payload).encode("utf-8"))
             r.setex(status_key, 3600, b"pending")
+            r.setex(progress_key, 3600, b"5")
 
             from tasks import run_separation
             run_separation.delay(task_id, content_hash, ext)
 
-            return {"taskId": task_id, "status": "pending"}
+            return {"taskId": task_id, "status": "pending", "progress": 5}
         except Exception:
             pass
 
@@ -549,6 +564,24 @@ async def separate(
     return result
 
 
+def _get_progress(r, task_id: str, status: str) -> int:
+    """Читает прогресс из Redis или возвращает оценку по статусу."""
+    progress_key = f"{PROGRESS_KEY_PREFIX}{task_id}"
+    raw = r.get(progress_key)
+    if raw:
+        try:
+            return int(raw.decode("utf-8"))
+        except ValueError:
+            pass
+    if status == "pending":
+        return 10
+    if status == "processing":
+        return 50
+    if status == "completed":
+        return 100
+    return 5
+
+
 @app.get("/separate/status/{task_id}")
 def separate_status(task_id: str):
     """Статус задачи разделения: pending | processing | completed | failed."""
@@ -558,8 +591,16 @@ def separate_status(task_id: str):
     status_key = f"{STATUS_KEY_PREFIX}{task_id}"
     raw = r.get(status_key)
     if not raw:
-        return {"taskId": task_id, "status": "unknown"}
-    return {"taskId": task_id, "status": raw.decode("utf-8")}
+        return {"taskId": task_id, "status": "unknown", "progress": 5}
+    status_str = raw.decode("utf-8")
+    progress = _get_progress(r, task_id, status_str)
+    out = {"taskId": task_id, "status": status_str, "progress": progress}
+    if status_str == "failed":
+        err_key = f"{ERROR_KEY_PREFIX}{task_id}"
+        err_raw = r.get(err_key)
+        if err_raw:
+            out["error"] = err_raw.decode("utf-8", errors="replace")
+    return out
 
 
 @app.get("/separate/result/{task_id}")
@@ -622,11 +663,13 @@ async def convert_to_midi(body: dict):
             task_id = str(uuid.uuid4())
             input_key = f"{MIDI_INPUT_KEY_PREFIX}{task_id}"
             status_key = f"{MIDI_STATUS_KEY_PREFIX}{task_id}"
+            progress_key = f"{PROGRESS_KEY_PREFIX}{task_id}"
             r.setex(input_key, 3600, json.dumps(body).encode("utf-8"))
             r.setex(status_key, 3600, b"pending")
+            r.setex(progress_key, 3600, b"5")
             from tasks import run_midi_conversion
             run_midi_conversion.delay(task_id)
-            return {"taskId": task_id, "status": "pending"}
+            return {"taskId": task_id, "status": "pending", "progress": 5}
         except Exception:
             pass
 
@@ -667,8 +710,10 @@ def convert_to_midi_status(task_id: str):
     status_key = f"{MIDI_STATUS_KEY_PREFIX}{task_id}"
     raw = r.get(status_key)
     if not raw:
-        return {"taskId": task_id, "status": "unknown"}
-    return {"taskId": task_id, "status": raw.decode("utf-8")}
+        return {"taskId": task_id, "status": "unknown", "progress": 5}
+    status_str = raw.decode("utf-8")
+    progress = _get_progress(r, task_id, status_str)
+    return {"taskId": task_id, "status": status_str, "progress": progress}
 
 
 @app.get("/convert-to-midi/result/{task_id}")
@@ -697,7 +742,8 @@ def get_job_state(job_type: str, task_id: str):
     _, status_key = _job_keys(job_type, task_id)
     raw = r.get(status_key)
     status = raw.decode("utf-8") if raw else "unknown"
-    return {"taskId": task_id, "type": job_type, "status": status}
+    progress = _get_progress(r, task_id, status)
+    return {"taskId": task_id, "type": job_type, "status": status, "progress": progress}
 
 
 @app.post("/jobs/{job_type}/{task_id}/cancel")

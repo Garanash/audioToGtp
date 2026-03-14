@@ -1,5 +1,5 @@
 /**
- * Контекст авторизации: Google, Яндекс, VK (структура готова для добавления провайдеров).
+ * Контекст авторизации: Google, Яндекс, Email/Password.
  */
 
 import {
@@ -14,8 +14,12 @@ import {
 import {
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInWithCustomToken,
   signOut as firebaseSignOut,
   onAuthStateChanged,
+  updateProfile,
   type User,
 } from 'firebase/auth';
 import { getFirebaseAuth } from '../config/firebase';
@@ -37,7 +41,9 @@ export interface AuthState {
 export interface AuthContextValue extends AuthState {
   signInWithGoogle: () => Promise<void>;
   signInWithYandex: () => Promise<void>;
-  signInWithVk: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string, displayName?: string) => Promise<void>;
+  signInWithCustomToken: (token: string) => Promise<void>;
   signOut: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
 }
@@ -73,6 +79,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, [auth]);
 
+  // Обработка OAuth callback: #auth_token=... или #auth_error=...
+  useEffect(() => {
+    const hash = window.location.hash?.slice(1) || '';
+    const params = new URLSearchParams(hash);
+    const token = params.get('auth_token');
+    const error = params.get('auth_error');
+    if (token && auth) {
+      signInWithCustomToken(auth, token)
+        .then(() => {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        })
+        .catch(() => {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        });
+      return;
+    }
+    if (error) {
+      console.warn('OAuth error:', error);
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, [auth]);
+
   const signInWithGoogle = useCallback(async () => {
     if (!auth) {
       console.warn('Firebase не настроен. Добавьте VITE_FIREBASE_* в .env');
@@ -84,15 +112,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithYandex = useCallback(async () => {
     if (!auth) return;
-    // TODO: добавить Yandex OAuth (через backend или кастомный провайдер Firebase)
-    window.alert('Вход через Яндекс будет доступен в следующем обновлении.');
+    window.location.href = '/api/auth/yandex';
   }, [auth]);
 
-  const signInWithVk = useCallback(async () => {
-    if (!auth) return;
-    // TODO: добавить VK OAuth (через backend или кастомный провайдер Firebase)
-    window.alert('Вход через ВКонтакте будет доступен в следующем обновлении.');
-  }, [auth]);
+  const signInWithCustomTokenFn = useCallback(
+    async (token: string) => {
+      if (!auth) {
+        throw new Error('Firebase не настроен');
+      }
+      await signInWithCustomToken(auth, token);
+    },
+    [auth]
+  );
+
+  const signInWithEmail = useCallback(
+    async (email: string, password: string) => {
+      if (!auth) {
+        throw new Error('Firebase не настроен. Добавьте VITE_FIREBASE_* в .env');
+      }
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+    },
+    [auth]
+  );
+
+  const signUpWithEmail = useCallback(
+    async (email: string, password: string, displayName?: string) => {
+      if (!auth) {
+        throw new Error('Firebase не настроен. Добавьте VITE_FIREBASE_* в .env');
+      }
+      const { user } = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      if (displayName?.trim()) {
+        await updateProfile(user, { displayName: displayName.trim() });
+      }
+    },
+    [auth]
+  );
 
   const signOut = useCallback(async () => {
     if (!auth) return;
@@ -111,7 +165,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isConfigured,
       signInWithGoogle,
       signInWithYandex,
-      signInWithVk,
+      signInWithEmail,
+      signUpWithEmail,
+      signInWithCustomToken: signInWithCustomTokenFn,
       signOut,
       getIdToken,
     }),
@@ -121,7 +177,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isConfigured,
       signInWithGoogle,
       signInWithYandex,
-      signInWithVk,
+      signInWithEmail,
+      signUpWithEmail,
+      signInWithCustomTokenFn,
       signOut,
       getIdToken,
     ]

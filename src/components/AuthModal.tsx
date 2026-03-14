@@ -1,11 +1,12 @@
 /**
- * Модальное окно входа: Google, Яндекс, VK.
- * Если Firebase не настроен — показываем те же кнопки; при нажатии выводим короткую подсказку.
+ * Модальное окно входа: Email/пароль + Google, Яндекс.
  */
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
+
+type TabType = 'email' | 'social';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -14,14 +15,65 @@ interface AuthModalProps {
 }
 
 export function AuthModal({ isOpen, onClose, mode = 'login' }: AuthModalProps) {
-  const { signInWithGoogle, signInWithYandex, signInWithVk, isConfigured } = useAuth();
+  const { signInWithGoogle, signInWithYandex, signInWithEmail, signUpWithEmail, isConfigured } = useAuth();
   const [hint, setHint] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabType>('email');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isOpen) setHint(null);
+    if (!isOpen) {
+      setHint(null);
+      setEmail('');
+      setPassword('');
+      setDisplayName('');
+      setEmailError(null);
+    }
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmailError(null);
+    if (!email.trim() || !password) {
+      setEmailError('Заполните email и пароль');
+      return;
+    }
+    if (mode === 'register' && password.length < 6) {
+      setEmailError('Пароль должен быть не менее 6 символов');
+      return;
+    }
+    if (!isConfigured) {
+      setHint('Скопируйте .env.example в .env. Вставьте токены (VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN и др.) из Firebase Console → Project settings. Включите «Email/Password» в Authentication → Sign-in method.');
+      return;
+    }
+    setEmailBusy(true);
+    try {
+      if (mode === 'register') {
+        await signUpWithEmail(email, password, displayName);
+      } else {
+        await signInWithEmail(email, password);
+      }
+      onClose();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка входа';
+      const fbMsg = String(msg);
+      if (fbMsg.includes('auth/invalid-email')) setEmailError('Неверный формат email');
+      else if (fbMsg.includes('auth/user-not-found') || fbMsg.includes('auth/invalid-credential')) setEmailError('Пользователь не найден или неверный пароль');
+      else if (fbMsg.includes('auth/email-already-in-use')) setEmailError('Этот email уже зарегистрирован');
+      else if (fbMsg.includes('auth/weak-password')) setEmailError('Пароль должен быть не менее 6 символов');
+      else if (fbMsg.includes('auth/operation-not-allowed')) setEmailError('Вход по почте отключён. Включите Email/Password в Firebase Console → Authentication → Sign-in method.');
+      else if (fbMsg.includes('auth/network-request-failed')) setEmailError('Ошибка сети. Проверьте подключение и добавьте домен в Firebase → Authentication → Authorized domains.');
+      else if (fbMsg.includes('auth/too-many-requests')) setEmailError('Слишком много попыток. Попробуйте позже.');
+      else setEmailError(fbMsg);
+    } finally {
+      setEmailBusy(false);
+    }
+  };
 
   const handleGoogle = async () => {
     if (!isConfigured) {
@@ -34,18 +86,10 @@ export function AuthModal({ isOpen, onClose, mode = 'login' }: AuthModalProps) {
 
   const handleYandex = async () => {
     if (!isConfigured) {
-      setHint('Сначала настройте Firebase (см. подсказку для Google). Вход через Яндекс будет доступен позже.');
+      setHint('Сначала настройте Firebase (см. подсказку для Google).');
       return;
     }
     await signInWithYandex();
-  };
-
-  const handleVk = async () => {
-    if (!isConfigured) {
-      setHint('Сначала настройте Firebase (см. подсказку для Google). Вход через ВКонтакте будет доступен позже.');
-      return;
-    }
-    await signInWithVk();
   };
 
   return (
@@ -68,10 +112,77 @@ export function AuthModal({ isOpen, onClose, mode = 'login' }: AuthModalProps) {
             {mode === 'register' ? 'Регистрация' : 'Вход'}
           </h3>
           <p className="mt-2 text-[#A0A0A0]">
-            Войдите через соцсеть, чтобы сохранять проекты и возвращаться к ним с любого устройства.
+            Сохраняйте проекты и возвращайтесь к ним с любого устройства.
           </p>
 
-          <div className="mt-8 flex flex-col gap-3">
+          <div className="mt-6 flex gap-2 rounded-xl border border-[#2A2A2A] bg-[#0D0D0D] p-1">
+            <button
+              type="button"
+              onClick={() => setTab('email')}
+              className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === 'email' ? 'bg-[#1A1A1A] text-[#E0E0E0]' : 'text-[#A0A0A0] hover:text-[#E0E0E0]'}`}
+            >
+              Почта
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('social')}
+              className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === 'social' ? 'bg-[#1A1A1A] text-[#E0E0E0]' : 'text-[#A0A0A0] hover:text-[#E0E0E0]'}`}
+            >
+              Соцсети
+            </button>
+          </div>
+
+          {tab === 'email' && (
+            <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
+              {mode === 'register' && (
+                <div>
+                  <label className="mb-1 block text-xs text-[#A0A0A0]">Имя</label>
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="Как к вам обращаться"
+                    className="w-full rounded-xl border border-[#2A2A2A] bg-[#0D0D0D] px-4 py-3 text-[#E0E0E0] placeholder-[#6B6B6B] focus:border-[#8A2BE2] focus:outline-none"
+                  />
+                </div>
+              )}
+              <div>
+                <label className="mb-1 block text-xs text-[#A0A0A0]">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  className="w-full rounded-xl border border-[#2A2A2A] bg-[#0D0D0D] px-4 py-3 text-[#E0E0E0] placeholder-[#6B6B6B] focus:border-[#8A2BE2] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-[#A0A0A0]">Пароль</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={mode === 'register' ? 'Минимум 6 символов' : '••••••••'}
+                  autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                  className="w-full rounded-xl border border-[#2A2A2A] bg-[#0D0D0D] px-4 py-3 text-[#E0E0E0] placeholder-[#6B6B6B] focus:border-[#8A2BE2] focus:outline-none"
+                />
+              </div>
+              {emailError && (
+                <p className="text-sm text-red-400">{emailError}</p>
+              )}
+              <button
+                type="submit"
+                disabled={emailBusy}
+                className="w-full rounded-xl bg-gradient-to-r from-[#8A2BE2] to-[#4B0082] py-3 font-semibold text-white transition-opacity hover:opacity-95 disabled:opacity-50"
+              >
+                {emailBusy ? 'Проверка...' : mode === 'register' ? 'Зарегистрироваться' : 'Войти'}
+              </button>
+            </form>
+          )}
+
+          {tab === 'social' && (
+          <div className="mt-6 flex flex-col gap-3">
             <button
               type="button"
               onClick={handleGoogle}
@@ -85,18 +196,11 @@ export function AuthModal({ isOpen, onClose, mode = 'login' }: AuthModalProps) {
               onClick={handleYandex}
               className="flex items-center justify-center gap-3 rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] px-6 py-3 font-medium text-[#E0E0E0] transition-all hover:border-[#3A3A3A] hover:bg-[#222]"
             >
-              <YandexIcon />
+              <img src="/yandex-icon.png" alt="" className="h-5 w-5 object-contain" />
               Войти через Яндекс
             </button>
-            <button
-              type="button"
-              onClick={handleVk}
-              className="flex items-center justify-center gap-3 rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] px-6 py-3 font-medium text-[#E0E0E0] transition-all hover:border-[#3A3A3A] hover:bg-[#222]"
-            >
-              <VkIcon />
-              Войти через ВКонтакте
-            </button>
           </div>
+          )}
 
           <AnimatePresence>
             {hint && (
@@ -164,18 +268,3 @@ function GoogleIcon() {
   );
 }
 
-function YandexIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M2.04 12c0-5.523 4.476-10 10-10 5.522 0 10 4.477 10 10s-4.478 10-10 10c-5.524 0-10-4.477-10-10zm10-8c-4.411 0-8 3.589-8 8s3.589 8 8 8 8-3.589 8-8-3.589-8-8-8zm-1 3v2h2v6h2V7h2V5h-6z" />
-    </svg>
-  );
-}
-
-function VkIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M15.684 0H8.316C1.592 0 0 1.592 0 8.316v7.368C0 22.408 1.592 24 8.316 24h7.368C22.408 24 24 22.408 24 15.684V8.316C24 1.592 22.408 0 15.684 0zm3.692 17.123h-1.744c-.66 0-.862-.525-2.049-1.727-1.033-1-1.49-1.378-1.744-1.378-.356 0-.458.102-.458.593v1.575c0 .424-.135.678-1.253.678-1.846 0-3.896-1.118-5.335-3.202C4.624 10.857 4.03 8.57 4.03 8.096c0-.254.102-.491.593-.491h1.744c.44 0 .61.203.78.677.863 2.49 2.303 4.675 2.896 4.675.22 0 .322-.102.322-.66V9.721c-.068-1.186-.695-1.287-.695-1.71 0-.203.17-.407.44-.407h2.744c.373 0 .508.203.508.643v3.473c0 .372.17.508.271.508.22 0 .407-.136.813-.542 1.254-1.406 2.151-3.574 2.151-3.574.119-.254.322-.491.763-.491h1.744c.525 0 .644.27.525.643-.22 1.017-2.354 3.896-2.354 3.896-.186.305-.254.44 0 .78.186.254.796.779 1.203 1.253.745.847 1.32 1.558 1.473 2.049.17.49-.085.744-.576.744z" />
-    </svg>
-  );
-}

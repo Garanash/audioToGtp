@@ -7,3 +7,4 @@ dist
 **/*.pyc
 terminals
 agent-transcripts
+gtp_tabs
