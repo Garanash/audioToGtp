@@ -14,6 +14,7 @@ interface AsyncTaskEvent {
   type: 'midi';
   status: AsyncTaskStatus;
   title: string;
+  progress?: number;
 }
 export type AccuracyMode = 'balanced' | 'max' | 'ultra' | 'extreme';
 
@@ -380,13 +381,17 @@ export function useMidiConversion(hookOptions: UseMidiConversionOptions = {}): U
             for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
               const statusRes = await fetch(`/api/convert-to-midi/status/${taskId}`);
               if (statusRes.ok) {
-                const statusData = (await statusRes.json().catch(() => ({}))) as { status?: string };
+                const statusData = (await statusRes.json().catch(() => ({}))) as {
+                  status?: string;
+                  progress?: number;
+                };
                 if (statusData.status) {
                   hookOptions.onAsyncTask?.({
                     id: taskId,
                     type: 'midi',
                     status: statusData.status as AsyncTaskStatus,
                     title: 'MIDI конвертация',
+                    progress: statusData.progress,
                   });
                 }
                 if (statusData.status === 'completed') {

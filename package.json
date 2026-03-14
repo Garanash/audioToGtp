@@ -28,6 +28,7 @@
     "firebase": "^12.10.0",
     "framer-motion": "^11.11.0",
     "howler": "^2.2.4",
+    "lamejs": "^1.2.1",
     "midi-writer-js": "^1.7.5",
     "onnxruntime-web": "^1.21.0",
     "qrcode.react": "^4.2.0",

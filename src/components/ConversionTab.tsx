@@ -6,10 +6,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ProcessingStatus } from './ProcessingStatus';
 import { ExportSection } from './ExportSection';
+import { GuestLimitModal } from './GuestLimitModal';
 import type { AudioStems, MidiTrackData } from '../types/audio.types';
 import { useAudioSeparation } from '../hooks/useAudioSeparation';
 import { useMidiConversion, type AccuracyMode } from '../hooks/useMidiConversion';
 import { useGtpExport } from '../hooks/useGtpExport';
+import { useGuestLimits } from '../contexts/GuestLimitsContext';
 import { fileToAudioBuffer } from '../utils/audioBuffer';
 import { AlphaTabPlayer } from './AlphaTabPlayer';
 import { StaffViewer } from './StaffViewer';
@@ -93,6 +95,8 @@ async function detectBpmFromFile(file: File): Promise<{ bpm: number; key: string
 }
 
 export function ConversionTab({ onWorkflowStateChange }: ConversionTabProps = {}) {
+  const { canPerform, markUsed } = useGuestLimits();
+  const [showLimitModal, setShowLimitModal] = useState(false);
   const [baseFilename, setBaseFilename] = useState('converted');
   const [detectedBpm, setDetectedBpm] = useState<number | null>(null);
   const [detectedKey, setDetectedKey] = useState<string | null>(null);
@@ -114,39 +118,47 @@ export function ConversionTab({ onWorkflowStateChange }: ConversionTabProps = {}
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [archiveMinutes, setArchiveMinutes] = useState<5 | 15 | 30>(15);
   const [autoArchiveEnabled, setAutoArchiveEnabled] = useState(true);
-  const upsertJob = useCallback((id: string, type: JobType, title: string, status: JobStatus) => {
-    setJobs((prev) => {
-      const existing = prev.find((j) => j.id === id);
-      if (existing) {
-        return prev.map((j) => (
-          j.id === id
-            ? { ...j, status, title, updatedAt: Date.now(), progress: inferJobProgress(type, status) }
-            : j
-        ));
-      }
-      const maxPinOrder = prev.reduce((max, j) => Math.max(max, j.pinOrder ?? 0), 0);
-      const next: JobItem = {
-        id,
-        type,
-        title,
-        status,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        progress: inferJobProgress(type, status),
-        pinOrder: maxPinOrder + 1,
-      };
-      return [...prev, next].slice(-MAX_STORED_JOBS);
-    });
-  }, []);
+  const upsertJob = useCallback(
+    (id: string, type: JobType, title: string, status: JobStatus, progress?: number) => {
+      setJobs((prev) => {
+        const resolvedProgress =
+          typeof progress === 'number' ? progress : inferJobProgress(type, status);
+        const existing = prev.find((j) => j.id === id);
+        if (existing) {
+          return prev.map((j) =>
+            j.id === id
+              ? { ...j, status, title, updatedAt: Date.now(), progress: resolvedProgress }
+              : j
+          );
+        }
+        const maxPinOrder = prev.reduce((max, j) => Math.max(max, j.pinOrder ?? 0), 0);
+        const next: JobItem = {
+          id,
+          type,
+          title,
+          status,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          progress: resolvedProgress,
+          pinOrder: maxPinOrder + 1,
+        };
+        return [...prev, next].slice(-MAX_STORED_JOBS);
+      });
+    },
+    []
+  );
 
   const separation = useAudioSeparation({
-    onAsyncTask: (task) => upsertJob(task.id, task.type, task.title, task.status as JobStatus),
+    onAsyncTask: (task) =>
+      upsertJob(task.id, task.type, task.title, task.status as JobStatus, task.progress),
   });
   const midiConversion = useMidiConversion({
-    onAsyncTask: (task) => upsertJob(task.id, task.type, task.title, task.status as JobStatus),
+    onAsyncTask: (task) =>
+      upsertJob(task.id, task.type, task.title, task.status as JobStatus, task.progress),
   });
   const { exportMidi, exportGtp, gtpError } = useGtpExport({
-    onAsyncTask: (task) => upsertJob(task.id, task.type, task.title, task.status as JobStatus),
+    onAsyncTask: (task) =>
+      upsertJob(task.id, task.type, task.title, task.status as JobStatus, task.progress),
   });
 
   const stems = separation.stems;
@@ -266,15 +278,11 @@ export function ConversionTab({ onWorkflowStateChange }: ConversionTabProps = {}
       }
       await bpmTask;
       if (!stemsResult) {
-        try {
-          const buffer = await fileToAudioBuffer(file);
-          stemsResult = { original: buffer, other: buffer };
-          separation.setStemsFromProject(stemsResult);
-        } catch (e) {
-          setUploadError(e instanceof Error ? e.message : 'Не удалось декодировать аудио');
-          setUiStage('idle');
-          return null;
-        }
+        setUploadError(
+          'Не удалось разделить аудио. Запустите backend с Demucs: npm run setup. Либо загрузите готовые stems (vocals, drums, bass, other).'
+        );
+        setUiStage('idle');
+        return null;
       }
       setUiStage('converting');
       const converted = await midiConversion.convert(stemsResult, { multiTrack: true, accuracyMode });
@@ -486,9 +494,9 @@ export function ConversionTab({ onWorkflowStateChange }: ConversionTabProps = {}
         try {
           const res = await fetch(`/api/jobs/${job.type}/${job.id}`);
           if (!res.ok) continue;
-          const data = await res.json().catch(() => ({} as { status?: JobStatus }));
+          const data = await res.json().catch(() => ({} as { status?: JobStatus; progress?: number }));
           if (!cancelled && data.status) {
-            upsertJob(job.id, job.type, job.title, data.status);
+            upsertJob(job.id, job.type, job.title, data.status, data.progress);
           }
         } catch {
           /* noop */
@@ -514,17 +522,21 @@ export function ConversionTab({ onWorkflowStateChange }: ConversionTabProps = {}
   }, [archiveMinutes, autoArchiveEnabled]);
 
   const status =
-    uiStage === 'preparing'
-      ? 'preparing'
-      : uiStage === 'analyzing'
-        ? 'analyzing'
-        : isLoading
-          ? separation.isLoading
-            ? 'separating'
-            : 'converting'
-          : stems && tracks
-            ? 'ready'
-            : 'idle';
+    error
+      ? 'error'
+      : uiStage === 'preparing'
+        ? 'preparing'
+        : uiStage === 'analyzing'
+          ? 'analyzing'
+          : isLoading
+            ? separation.isLoading
+              ? 'separating'
+              : 'converting'
+            : stems && tracks
+              ? 'ready'
+              : hasStarted
+                ? 'separating'
+                : 'idle';
 
   const progress = separation.isLoading ? separation.progress : midiConversion.progress;
 
@@ -534,6 +546,11 @@ export function ConversionTab({ onWorkflowStateChange }: ConversionTabProps = {}
       animate={{ opacity: 1, y: 0 }}
       className="space-y-8"
     >
+      <GuestLimitModal
+        isOpen={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        actionName="Конвертация в GTP"
+      />
       {!hasStarted && (
       <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#111111]">
         <div className="grid grid-cols-1 md:grid-cols-2">
@@ -541,7 +558,13 @@ export function ConversionTab({ onWorkflowStateChange }: ConversionTabProps = {}
             <UploadDropzone
               accept={AUDIO_ACCEPT}
               onFileSelect={(f) => {
-                if (AUDIO_EXT.test(f.name)) void handleSplitFile(f);
+                if (!AUDIO_EXT.test(f.name)) return;
+                if (!canPerform('conversion')) {
+                  setShowLimitModal(true);
+                  return;
+                }
+                markUsed('conversion');
+                void handleSplitFile(f);
               }}
               disabled={isLoading}
               title="Разобрать на дорожки"
@@ -560,7 +583,13 @@ export function ConversionTab({ onWorkflowStateChange }: ConversionTabProps = {}
             <UploadDropzone
               accept={AUDIO_ACCEPT}
               onFileSelect={(f) => {
-                if (AUDIO_EXT.test(f.name)) void handleSingleTrackFile(f);
+                if (!AUDIO_EXT.test(f.name)) return;
+                if (!canPerform('conversion')) {
+                  setShowLimitModal(true);
+                  return;
+                }
+                markUsed('conversion');
+                void handleSingleTrackFile(f);
               }}
               disabled={isLoading}
               title="Одна дорожка"

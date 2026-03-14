@@ -1,0 +1,21 @@
+[Unit]
+Description=GTP Converter - Celery Worker (разделение, MIDI, GTP)
+After=network.target
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/gtpconverter/server
+ExecStart=/opt/gtpconverter/.venv/bin/celery -A celery_app worker -l info -c 1 --concurrency=1
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/gtpconverter
+EnvironmentFile=-/opt/gtpconverter/.env
+Environment=USE_CELERY=1
+Environment=REDIS_URL=redis://127.0.0.1:6379/0
+# Для GPU: DEMUCS_DEVICE=cuda (добавить в .env)
+
+[Install]
+WantedBy=multi-user.target

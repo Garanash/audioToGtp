@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { UploadDropzone } from './common/UploadDropzone';
+import { GuestLimitModal } from './GuestLimitModal';
+import { useGuestLimits } from '../contexts/GuestLimitsContext';
 import { audioBufferToWavBlob, fileToAudioBuffer } from '../utils/audioBuffer';
 
 function clamp(value: number, min: number, max: number) {
@@ -33,6 +35,8 @@ const FX_PRESETS: FxPreset[] = [
 ];
 
 export function EffectsTab() {
+  const { canPerform, markUsed } = useGuestLimits();
+  const [showLimitModal, setShowLimitModal] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [buffer, setBuffer] = useState<AudioBuffer | null>(null);
   const [wet, setWet] = useState(40);
@@ -77,6 +81,11 @@ export function EffectsTab() {
 
   const applyEffects = useCallback(async () => {
     if (!buffer || !file) return;
+    if (!canPerform('effects')) {
+      setShowLimitModal(true);
+      return;
+    }
+    markUsed('effects');
     setProcessing(true);
     try {
       const ctx = new OfflineAudioContext({
@@ -150,7 +159,7 @@ export function EffectsTab() {
     } finally {
       setProcessing(false);
     }
-  }, [buffer, file, wet, delayMs, feedback, reverbSec, lowpassHz, distortion, resultUrl]);
+  }, [buffer, file, wet, delayMs, feedback, reverbSec, lowpassHz, distortion, resultUrl, canPerform, markUsed]);
 
   const exportPreset = () => {
     const preset = {
@@ -209,6 +218,11 @@ export function EffectsTab() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      <GuestLimitModal
+        isOpen={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        actionName="Эффекты"
+      />
       <div className="rounded-2xl border border-[#2A2A2A] bg-[#111111] p-5">
         <UploadDropzone
           accept=".mp3,.wav,.flac,.m4a,audio/*"

@@ -6,6 +6,15 @@ Backend: разделение аудио (Demucs) и API проектов пол
 Воркер: celery -A celery_app worker -l info -c 2
 """
 
+from pathlib import Path
+_ROOT = Path(__file__).resolve().parent.parent
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_ROOT / ".env")
+    load_dotenv(_ROOT / ".env.local", override=True)
+except ImportError:
+    pass
+
 import base64
 import hashlib
 import json
@@ -18,14 +27,12 @@ import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
 # Доступ к backend (GTP) при запуске из корня репо или server/)
-_ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 try:
@@ -172,16 +179,31 @@ def _job_keys(job_type: str, task_id: str) -> tuple[str, str]:
     raise HTTPException(400, "Неверный тип задачи. Используйте: separate | midi | gtp")
 
 
+def _get_demucs_device() -> str:
+    """cpu или cuda если доступна (DEMUCS_DEVICE)."""
+    device = os.environ.get("DEMUCS_DEVICE", "cpu").strip().lower()
+    if device == "cuda":
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return "cuda"
+        except ImportError:
+            pass
+        return "cpu"
+    return device
+
+
 def _run_demucs_sync(in_file: Path, out_dir: Path) -> tuple[str | None, list[str]]:
     """Запускает Demucs синхронно. Возвращает (used_model, stem_names)."""
     stem_names_6 = ("drums", "bass", "other", "vocals", "guitar", "piano")
     stem_names_4 = ("drums", "bass", "other", "vocals")
+    device = _get_demucs_device()
     for model_name, stem_names in [("htdemucs_6s", stem_names_6), ("htdemucs", stem_names_4)]:
         cmd = [
             sys.executable, "-m", "demucs_infer",
             "-n", model_name,
             "--segment", "5" if model_name == "htdemucs_6s" else "7",
-            "-d", "cpu",
+            "-d", device,
             "-o", str(out_dir),
             str(in_file),
         ]

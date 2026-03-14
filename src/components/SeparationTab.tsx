@@ -8,9 +8,12 @@ import { motion } from 'framer-motion';
 import { FileUploader } from './FileUploader';
 import { StemPlayer } from './StemPlayer';
 import { ProgressInlineBar } from './common/ProgressInlineBar';
+import { GuestLimitModal } from './GuestLimitModal';
 import { useAudioSeparation } from '../hooks/useAudioSeparation';
 import { useAuth } from '../contexts/AuthContext';
+import { useGuestLimits } from '../contexts/GuestLimitsContext';
 import { useProjects } from '../contexts/ProjectsContext';
+import { useOpenProject } from '../contexts/OpenProjectContext';
 import type { ProjectListItem } from '../types/project.types';
 
 interface SeparationTabProps {
@@ -24,6 +27,8 @@ export function SeparationTab({ onWorkflowStateChange }: SeparationTabProps = {}
   const [loadingProjectId, setLoadingProjectId] = useState<string | null>(null);
   const [hasStarted, setHasStarted] = useState(false);
   const { user } = useAuth();
+  const { canPerform, markUsed } = useGuestLimits();
+  const [showLimitModal, setShowLimitModal] = useState(false);
   const {
     list: projectsList,
     isLoading: projectsLoading,
@@ -44,16 +49,32 @@ export function SeparationTab({ onWorkflowStateChange }: SeparationTabProps = {}
     setStemsFromProject,
     reset,
   } = useAudioSeparation();
+  const { consumePayload } = useOpenProject();
 
   const separationProjects = projectsList.filter((p) => p.type === 'separation');
 
+  useEffect(() => {
+    const payload = consumePayload();
+    if (payload?.type === 'separation') {
+      setHasStarted(true);
+      setStemsFromProject(payload.stems);
+      setBaseFilename(payload.name);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleFileSelect = useCallback(
     (file: File) => {
+      if (!canPerform('separation')) {
+        setShowLimitModal(true);
+        return;
+      }
       setHasStarted(true);
       setBaseFilename(file.name.replace(/\.[^.]+$/, ''));
+      markUsed('separation');
       separate(file);
     },
-    [separate]
+    [canPerform, markUsed, separate]
   );
 
   const handleSaveProject = useCallback(async () => {
@@ -126,6 +147,11 @@ export function SeparationTab({ onWorkflowStateChange }: SeparationTabProps = {}
       animate={{ opacity: 1, y: 0 }}
       className="space-y-8"
     >
+      <GuestLimitModal
+        isOpen={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        actionName="Разделение на дорожки"
+      />
       {user && separationProjects.length > 0 && (
         <section className="rounded-2xl border border-[#2A2A2A] bg-[#111111] p-6">
           <h3 className="mb-4 text-lg font-semibold text-[#E0E0E0]">
@@ -179,23 +205,47 @@ export function SeparationTab({ onWorkflowStateChange }: SeparationTabProps = {}
         />
       )}
 
-      {isLoading && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#0A0A0A]/55 backdrop-blur-[2px]">
+      {(hasStarted && !stems) && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#0A0A0A]/90 backdrop-blur-[4px]">
           <div className="w-full max-w-md px-4">
-            <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#0F0F10]/95 p-4 shadow-2xl">
-              <div className="mb-3 flex items-center gap-3">
-                <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#8A2BE2] border-t-transparent" />
-                <p className="text-sm font-medium text-[#E0E0E0]">
-                  {processingLabelByStatus[status] ?? 'Обработка...'}
-                </p>
-              </div>
-              <ProgressInlineBar
-                value={progress}
-                label={detailedStage ?? processingLabelByStatus[status] ?? 'Обработка...'}
-                className="mb-2"
-              />
-              {downloadProgress > 0 && downloadProgress < 100 && (
-                <p className="text-right text-[11px] text-[#7F7F7F]">Скачивание модели: {Math.round(downloadProgress)}%</p>
+            <div className="overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#111111]/95 p-6 shadow-2xl">
+              {isLoading ? (
+                <>
+                  <div className="mb-3 flex items-center gap-3">
+                    <div className="h-7 w-7 shrink-0 animate-spin rounded-full border-2 border-[#8A2BE2] border-t-transparent" />
+                    <p className="text-sm font-medium text-[#E0E0E0]">
+                      {processingLabelByStatus[status] ?? 'Обработка...'}
+                    </p>
+                  </div>
+                  <ProgressInlineBar
+                    value={progress}
+                    label={detailedStage ?? processingLabelByStatus[status] ?? 'Обработка...'}
+                    className="mb-2"
+                  />
+                  {downloadProgress > 0 && downloadProgress < 100 && (
+                    <p className="mt-2 text-right text-[11px] text-[#7F7F7F]">Скачивание модели: {Math.round(downloadProgress)}%</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="mb-3 flex items-center gap-3">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-500/30">
+                      <svg className="h-4 w-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </div>
+                    <p className="text-sm font-medium text-[#E0E0E0]">Ошибка разделения</p>
+                  </div>
+                  {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
+                  {separationWarning && <p className="mb-4 text-xs text-[#A0A0A0]">{separationWarning}</p>}
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    className="w-full rounded-full bg-gradient-to-r from-[#8A2BE2] to-[#4B0082] px-6 py-3 font-semibold text-white transition-opacity hover:opacity-90"
+                  >
+                    Начать заново
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -227,9 +277,6 @@ export function SeparationTab({ onWorkflowStateChange }: SeparationTabProps = {}
                 {saving ? 'Сохранение...' : 'Сохранить проект'}
               </button>
             </div>
-          )}
-          {error && (
-            <p className="text-sm text-red-400">{error}</p>
           )}
           {separationWarning && (
             <p className={`text-sm ${usedFallback ? 'text-amber-300' : 'text-[#A0A0A0]'}`}>{separationWarning}</p>

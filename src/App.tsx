@@ -3,11 +3,14 @@ import { useModelPreload } from './hooks/useModelPreload';
 import { motion } from 'framer-motion';
 import { Header } from './components/Header';
 import { CookieConsent } from './components/CookieConsent';
+import { MADE_FOR_CARDS } from './components/nav/navConfig';
 import { TelegramQR } from './components/TelegramQR';
+import { AlphaModal } from './components/AlphaModal';
 import { SeparationTab } from './components/SeparationTab';
 import { ConversionTab } from './components/ConversionTab';
 import { NotationTab } from './components/NotationTab';
 import { LibraryTab } from './components/LibraryTab';
+import { CabinetTab } from './components/CabinetTab';
 import { ToolsTab } from './components/ToolsTab';
 import { SupportTab } from './components/SupportTab';
 import { EffectsTab } from './components/EffectsTab';
@@ -17,6 +20,7 @@ type TabId =
   | 'conversion'
   | 'notation'
   | 'library'
+  | 'cabinet'
   | 'vocal-remover'
   | 'pitcher'
   | 'time-signature'
@@ -31,6 +35,7 @@ interface LandingFeatureCard {
   title: string;
   text: string;
   image: string;
+  video?: string;
 }
 
 interface TourStep {
@@ -97,6 +102,16 @@ function App() {
           <rect x="4" y="4" width="5" height="16" rx="1.5" />
           <rect x="10" y="5.5" width="5" height="14.5" rx="1.5" opacity="0.82" />
           <rect x="16" y="7" width="4" height="13" rx="1.2" opacity="0.62" />
+        </svg>
+      ),
+    },
+    {
+      id: 'cabinet',
+      label: 'Личный кабинет',
+      icon: (
+        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="12" cy="8" r="3.2" />
+          <path d="M4 20a8 8 0 0 1 16 0v1.2H4V20Z" opacity="0.8" />
         </svg>
       ),
     },
@@ -203,21 +218,12 @@ function App() {
     },
   ];
 
+  const base = import.meta.env.BASE_URL;
   const landingCards: LandingFeatureCard[] = [
     {
       title: 'Разделяй трек',
       text: 'Demucs + async pipeline + live progress',
-      image: `${import.meta.env.BASE_URL}musca-logo.png`,
-    },
-    {
-      title: 'Редактируй ноты',
-      text: 'Page-view notation, tab/score, timeline seek',
-      image: 'https://images.unsplash.com/photo-1461784180009-21121b2f204c?auto=format&fit=crop&w=1600&q=80',
-    },
-    {
-      title: 'Прокачай звук',
-      text: 'Pro FX chain: reverb, delay, filter, distortion',
-      image: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1600&q=80',
+      image: `${base}favicon.png`,
     },
   ];
 
@@ -264,6 +270,7 @@ function App() {
     }
     if (activeTab === 'notation') return <NotationTab convertedTracks={null} />;
     if (activeTab === 'library') return <LibraryTab />;
+    if (activeTab === 'cabinet') return <CabinetTab onSwitchToTab={(tab) => { setActiveTab(tab); }} />;
     if (activeTab === 'vocal-remover') return <ToolsTab mode="vocal-remover" />;
     if (activeTab === 'pitcher') return <ToolsTab mode="pitcher" />;
     if (activeTab === 'time-signature') return <ToolsTab mode="time-signature" />;
@@ -286,6 +293,15 @@ function App() {
   }, [showWorkspace]);
 
   useEffect(() => {
+    const handler = () => {
+      setActiveTab('cabinet');
+      setShowWorkspace(true);
+    };
+    window.addEventListener('musca:openCabinet', handler);
+    return () => window.removeEventListener('musca:openCabinet', handler);
+  }, []);
+
+  useEffect(() => {
     if (!tourOpen) return;
     const step = tourSteps[tourStepIdx];
     if (step?.tab) setActiveTab(step.tab);
@@ -298,13 +314,38 @@ function App() {
     }
     const update = () => {
       const step = tourSteps[tourStepIdx];
-      const el = step ? document.querySelector(step.selector) as HTMLElement | null : null;
-      setTourRect(el ? el.getBoundingClientRect() : null);
+      if (!step) return;
+      const el = document.querySelector(step.selector) as HTMLElement | null;
+      if (!el) {
+        setTourRect(null);
+        return;
+      }
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      if (step.selector === '[data-tour="top-menu"]') {
+        const tabs = document.querySelectorAll('[data-tour-tab]');
+        if (tabs.length > 0) {
+          let minLeft = Infinity;
+          let minTop = Infinity;
+          let maxRight = -Infinity;
+          let maxBottom = -Infinity;
+          tabs.forEach((tab) => {
+            const r = (tab as HTMLElement).getBoundingClientRect();
+            minLeft = Math.min(minLeft, r.left);
+            minTop = Math.min(minTop, r.top);
+            maxRight = Math.max(maxRight, r.right);
+            maxBottom = Math.max(maxBottom, r.bottom);
+          });
+          setTourRect(
+            new DOMRect(minLeft, minTop, maxRight - minLeft, maxBottom - minTop)
+          );
+          return;
+        }
+      }
+      setTourRect(el.getBoundingClientRect());
     };
-    update();
+    const timer = window.setTimeout(update, 100);
     window.addEventListener('resize', update);
     window.addEventListener('scroll', update, true);
-    const timer = window.setTimeout(update, 80);
     return () => {
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
@@ -322,6 +363,7 @@ function App() {
       <Header />
       <CookieConsent />
       <TelegramQR />
+      <AlphaModal />
 
       <main className="pt-20">
         {!showWorkspace && (
@@ -343,13 +385,54 @@ function App() {
               <div className="absolute inset-0 bg-[#0A0A0A]/72 backdrop-blur-[2px]" aria-hidden />
               <div className="relative z-10 mx-auto flex min-h-[360px] max-w-7xl flex-col items-start justify-center px-4 py-16 md:min-h-[420px] md:px-6">
                 <h1 className="max-w-3xl text-5xl font-extrabold tracking-tight md:text-7xl">
-                  <span className="bg-gradient-to-r from-white to-gray-500 bg-clip-text text-transparent">Musca Studio</span>
+                  <span className="bg-gradient-to-r from-white to-gray-500 bg-clip-text text-transparent">Musicvibe</span>
                 </h1>
                 <p className="mt-6 max-w-2xl text-lg text-[#E0E0E0]/90 md:text-xl">
                   Разделение, конвертация в GTP, редактура и FX-обработка в одном рабочем пространстве.
                 </p>
               </div>
             </motion.section>
+
+            <section className="mx-auto max-w-7xl px-4 py-16 md:px-6">
+              <h2 className="mb-8 text-center text-3xl font-extrabold tracking-tight text-[#E0E0E0] md:text-4xl">
+                Сделано для
+              </h2>
+              <div className="grid min-w-0 grid-cols-5 gap-4 overflow-x-auto">
+                {MADE_FOR_CARDS.map((card) => (
+                  <a
+                    key={card.id}
+                    href={card.href}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      const tabId = card.href.replace('#', '') as TabId;
+                      if (['separation', 'conversion', 'notation', 'library'].includes(tabId)) {
+                        setActiveTab(tabId);
+                      }
+                      setShowWorkspace(true);
+                    }}
+                    className="group relative isolate overflow-hidden rounded-2xl border border-[#2A2A2A] bg-[#111111] transition-all duration-300 hover:scale-105 hover:border-[#8A2BE2]/60 hover:shadow-lg hover:shadow-[#8A2BE2]/10"
+                  >
+                    <div className="relative aspect-[3/4] w-full">
+                      {card.imageUrl ? (
+                        <img
+                          src={card.imageUrl}
+                          alt=""
+                          className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+                        />
+                      ) : (
+                        <div className={`absolute inset-0 ${card.gradient || 'bg-[#1A1A1A]'}`} />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] via-[#0A0A0A]/60 to-transparent" />
+                      <div className="absolute inset-0 flex flex-col justify-end p-5">
+                        <h3 className="text-lg font-bold text-white drop-shadow-lg md:text-xl">{card.title}</h3>
+                        <p className="mt-1.5 line-clamp-2 text-sm text-[#E0E0E0]/90">{card.description}</p>
+                      </div>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </section>
+
             <section className="mx-auto max-w-7xl space-y-8 px-4 py-14 md:px-6">
               <div className="space-y-5">
                 {landingCards.map((card, idx) => (
@@ -365,8 +448,6 @@ function App() {
                           idx === 0 ? 'object-center' : 'object-top'
                         }`}
                       />
-                      <div className="absolute inset-0 bg-gradient-to-r from-[#0A0A0A]/85 via-[#0A0A0A]/55 to-transparent" />
-                      <div className="absolute inset-0 border border-[#2A2A2A]/80 transition-colors duration-300 group-hover:border-[#8A2BE2]/60" />
                       <div className="relative z-10 flex h-full max-w-2xl flex-col justify-end p-6 md:p-10">
                         <h3 className="text-3xl font-extrabold tracking-tight text-[#E0E0E0] md:text-5xl">{card.title}</h3>
                         <p className="mt-3 text-base text-[#C9CBD2] md:text-lg">{card.text}</p>
@@ -375,19 +456,29 @@ function App() {
                   </article>
                 ))}
               </div>
-              <div className="rounded-2xl border border-[#2A2A2A] bg-[#111111] p-8 text-center">
-                <h2 className="text-3xl font-extrabold text-[#E0E0E0] md:text-4xl">Готов начать?</h2>
-                <p className="mx-auto mt-3 max-w-2xl text-[#A0A0A0]">
-                  Нажми кнопку и откроется основное рабочее меню со всеми инструментами.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowWorkspace(true)}
-                  className="mt-6 rounded-full bg-gradient-to-r from-[#8A2BE2] to-[#4B0082] px-8 py-3 text-base font-semibold text-white transition-all duration-300 hover:scale-105"
-                >
-                  Начнем
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowWorkspace(true)}
+                className="group relative w-full overflow-hidden rounded-2xl border-2 border-[#8A2BE2]/40 bg-[#111111] p-8 text-left transition-all duration-300 hover:scale-[1.02] hover:border-[#8A2BE2]/80 hover:shadow-[0_0_40px_rgba(138,43,226,0.2)] md:p-12"
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-[#8A2BE2]/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                <div className="relative z-10 flex flex-col items-center justify-center text-center md:flex-row md:justify-between md:text-left">
+                  <div>
+                    <h2 className="text-3xl font-extrabold tracking-tight text-[#E0E0E0] md:text-4xl">
+                      Готов начать?
+                    </h2>
+                    <p className="mx-auto mt-3 max-w-2xl text-[#A0A0A0] md:mx-0">
+                      Нажми кнопку и откроется основное рабочее меню со всеми инструментами. Разделение, конвертация, ноты и многое другое — в одном месте.
+                    </p>
+                  </div>
+                  <span className="mt-6 flex shrink-0 items-center gap-2 rounded-full bg-gradient-to-r from-[#8A2BE2] to-[#4B0082] px-8 py-4 text-base font-semibold text-white shadow-lg shadow-[#8A2BE2]/30 transition-all duration-300 group-hover:scale-105 group-hover:shadow-[#8A2BE2]/50 md:mt-0">
+                    Начнём
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                  </span>
+                </div>
+              </button>
             </section>
           </>
         )}
@@ -433,10 +524,10 @@ function App() {
               <div
                 className="pointer-events-none fixed rounded-2xl border border-[#8A2BE2] bg-transparent shadow-[0_0_0_9999px_rgba(5,5,8,0.78)]"
                 style={{
-                  left: Math.max(8, tourRect.left - 8),
-                  top: Math.max(8, tourRect.top - 8),
-                  width: Math.min(window.innerWidth - 16, tourRect.width + 16),
-                  height: Math.min(window.innerHeight - 16, tourRect.height + 16),
+                  left: Math.max(8, tourRect.left - 20),
+                  top: Math.max(8, tourRect.top - 20),
+                  width: Math.min(window.innerWidth - 16, tourRect.width + 40),
+                  height: Math.min(window.innerHeight - 16, tourRect.height + 40),
                 }}
               />
             ) : (

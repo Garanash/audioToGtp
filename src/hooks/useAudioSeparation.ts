@@ -25,6 +25,7 @@ interface AsyncTaskEvent {
   type: AsyncTaskType;
   status: AsyncTaskStatus;
   title: string;
+  progress?: number;
 }
 
 export interface UseAudioSeparationResult {
@@ -43,6 +44,7 @@ export interface UseAudioSeparationResult {
 
 interface UseAudioSeparationOptions {
   onAsyncTask?: (task: AsyncTaskEvent) => void;
+  onProgress?: (progress: number) => void;
 }
 
 const MODEL_URL_REMOTE =
@@ -74,20 +76,21 @@ const FAST_SEPARATION_THRESHOLD_SEC = 180;
 
 async function pollSeparateResult(
   taskId: string,
-  onStatus?: (status: AsyncTaskStatus) => void
+  onStatus?: (status: AsyncTaskStatus, progress?: number) => void
 ): Promise<Record<string, string>> {
   for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
     const statusRes = await fetch(`${BACKEND_URL}/separate/status/${taskId}`);
     if (!statusRes.ok) continue;
-    const statusData = await safeJson<{ status?: string }>(statusRes, {});
-    if (statusData.status) onStatus?.(statusData.status as AsyncTaskStatus);
+    const statusData = await safeJson<{ status?: string; progress?: number }>(statusRes, {});
+    if (statusData.status) onStatus?.(statusData.status as AsyncTaskStatus, statusData.progress);
     if (statusData.status === 'completed') {
       const resultRes = await fetch(`${BACKEND_URL}/separate/result/${taskId}`);
       if (!resultRes.ok) throw new Error('Не удалось получить результат разделения');
       return (await resultRes.json()) as Record<string, string>;
     }
     if (statusData.status === 'failed') {
-      throw new Error('Серверная задача разделения завершилась с ошибкой');
+      const errMsg = (statusData as { error?: string }).error;
+      throw new Error(errMsg || 'Серверная задача разделения завершилась с ошибкой');
     }
     if (statusData.status === 'cancelled') {
       throw new Error('Задача разделения отменена');
@@ -103,10 +106,17 @@ function stemsFromData(data: Record<string, string>): boolean {
   );
 }
 
+interface SeparateBackendOptions {
+  onTask?: (task: AsyncTaskEvent) => void;
+  onProgress?: (progress: number) => void;
+}
+
 async function separateViaBackend(
   file: File,
-  onTask?: (task: AsyncTaskEvent) => void
+  opts?: SeparateBackendOptions
 ): Promise<AudioStems | null> {
+  const onTask = opts?.onTask;
+  const onProgress = opts?.onProgress;
   let res: Response;
   try {
     res = await fetch(`${BACKEND_URL}/health`);
@@ -134,16 +144,23 @@ async function separateViaBackend(
     throw new Error(err.detail ?? `Backend: ${sepRes.status}`);
   }
 
-  const data = (await safeJson(sepRes, {})) as Record<string, string> | { taskId?: string; status?: string };
+  const data = (await safeJson(sepRes, {})) as Record<string, string> | { taskId?: string; status?: string; progress?: number };
 
   const taskId = typeof data?.taskId === 'string' ? data.taskId : null;
   const dataStems = taskId
-    ? await pollSeparateResult(taskId, (status) =>
-        onTask?.({ id: taskId, type: 'separate', status, title: 'Разделение на дорожки' })
-      )
+    ? await pollSeparateResult(taskId, (status, progress) => {
+        if (typeof progress === 'number') onProgress?.(progress);
+        onTask?.({
+          id: taskId,
+          type: 'separate',
+          status,
+          title: 'Разделение на дорожки',
+          progress: progress ?? undefined,
+        });
+      })
     : (data as Record<string, string>);
   if (taskId) {
-    onTask?.({ id: taskId, type: 'separate', status: 'completed', title: 'Разделение на дорожки' });
+    onTask?.({ id: taskId, type: 'separate', status: 'completed', title: 'Разделение на дорожки', progress: 100 });
   }
 
   if (!stemsFromData(dataStems)) return null;
@@ -170,18 +187,6 @@ function createAudioBufferFromChannels(
   buffer.copyToChannel(new Float32Array(left), 0);
   buffer.copyToChannel(new Float32Array(right), 1);
   return buffer;
-}
-
-function createPlaceholderStems(original: AudioBuffer): AudioStems {
-  return {
-    original,
-    vocals: original,
-    drums: original,
-    bass: original,
-    other: original,
-    guitar: original,
-    piano: original,
-  };
 }
 
 const STEM_ORDER: (keyof Omit<AudioStems, 'original'>)[] = ['drums', 'bass', 'other', 'vocals', 'guitar', 'piano'];
@@ -233,7 +238,12 @@ export function useAudioSeparation(options: UseAudioSeparationOptions = {}): Use
 
     try {
       setProgress(5);
-      const backendStems = await separateViaBackend(file, options.onAsyncTask);
+      const backendStems = await separateViaBackend(file, {
+        onTask: options.onAsyncTask,
+        onProgress: (p) => {
+          setProgress(p);
+        },
+      });
       if (backendStems) {
         setProgress(100);
         setStems(backendStems);
@@ -386,27 +396,16 @@ export function useAudioSeparation(options: UseAudioSeparationOptions = {}): Use
         err instanceof Error ? err.message : 'Ошибка разделения аудио';
       setError(message);
       setSeparationWarning(null);
-      setUsedFallback(true);
+      setUsedFallback(false);
+      setProgress(0);
       console.error('Audio separation error:', err);
-
-      try {
-        const fallbackBuffer = await fileToAudioBuffer(file);
-        const fallback = createPlaceholderStems(fallbackBuffer);
-        setStems(fallback);
-        setProgress(100);
-        const isWasmError = /WASM|WebAssembly|magic word|initWasm/i.test(message);
-        setError(
-          isWasmError
-            ? 'Браузерная модель недоступна. Загрузите готовые stems или настройте backend: npm run setup'
-            : `${message} Показаны копии оригинала. Загрузите готовые stems или настройте backend.`
-        );
-        setSeparationWarning(
-          'Разделение не сработало. Варианты: 1) Загрузите готовые stems во вкладке «Конвертация в MIDI». 2) Запустите backend: npm run dev и npm run setup'
-        );
-        return fallback;
-      } catch {
-        return null;
-      }
+      const isWasmError = /WASM|WebAssembly|magic word|initWasm/i.test(message);
+      setSeparationWarning(
+        isWasmError
+          ? 'Браузерная модель недоступна. Настройте backend: npm run setup'
+          : 'Запустите backend с Demucs: npm run dev и npm run setup. Либо загрузите готовые stems (vocals, drums, bass, other).'
+      );
+      return null;
     } finally {
       setIsLoading(false);
     }

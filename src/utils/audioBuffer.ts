@@ -2,6 +2,8 @@
  * Утилиты для работы с AudioBuffer
  */
 
+import lamejs from 'lamejs';
+
 const WAVEFORM_SAMPLES = 512;
 
 /**
@@ -231,6 +233,100 @@ export function audioBufferToWavBlob(audioBuffer: AudioBuffer): Blob {
   }
 
   return new Blob([buffer], { type: 'audio/wav' });
+}
+
+const MP3_BITRATE_KBPS = 192;
+const MP3_SAMPLE_BLOCK = 1152;
+
+function floatToInt16(float32: Float32Array): Int16Array {
+  const int16 = new Int16Array(float32.length);
+  for (let i = 0; i < float32.length; i++) {
+    const s = Math.max(-1, Math.min(1, float32[i]));
+    int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return int16;
+}
+
+const MP3_YIELD_EVERY_CHUNKS = 50;
+
+/**
+ * Конвертирует AudioBuffer в MP3 Blob (синхронная версия, блокирует главный поток)
+ */
+export function audioBufferToMp3Blob(audioBuffer: AudioBuffer): Blob {
+  return audioBufferToMp3BlobSync(audioBuffer);
+}
+
+/**
+ * Конвертирует AudioBuffer в MP3 Blob асинхронно с отдачей управления и отчётом прогресса
+ */
+export async function audioBufferToMp3BlobAsync(
+  audioBuffer: AudioBuffer,
+  onProgress?: (percent: number) => void
+): Promise<Blob> {
+  await new Promise<void>((r) => setTimeout(r, 0));
+  const channels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const left = floatToInt16(audioBuffer.getChannelData(0));
+  const right =
+    channels > 1 ? floatToInt16(audioBuffer.getChannelData(1)) : left;
+
+  const encoder = new lamejs.Mp3Encoder(channels, sampleRate, MP3_BITRATE_KBPS);
+  const mp3Chunks: Int8Array[] = [];
+  const totalChunks = Math.ceil(left.length / MP3_SAMPLE_BLOCK);
+
+  for (let i = 0; i < left.length; i += MP3_SAMPLE_BLOCK) {
+    const chunkIndex = Math.floor(i / MP3_SAMPLE_BLOCK);
+    if (chunkIndex > 0 && chunkIndex % MP3_YIELD_EVERY_CHUNKS === 0) {
+      const percent = Math.min(99, Math.round((chunkIndex / totalChunks) * 100));
+      onProgress?.(percent);
+      await new Promise<void>((r) => setTimeout(r, 0));
+    }
+    const leftChunk = left.subarray(i, i + MP3_SAMPLE_BLOCK);
+    const rightChunk = right.subarray(i, i + MP3_SAMPLE_BLOCK);
+    const mp3buf = encoder.encodeBuffer(leftChunk, rightChunk);
+    if (mp3buf.length > 0) mp3Chunks.push(mp3buf);
+  }
+  const final = encoder.flush();
+  if (final.length > 0) mp3Chunks.push(final);
+
+  const totalLength = mp3Chunks.reduce((acc, c) => acc + c.length, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of mp3Chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  onProgress?.(100);
+  return new Blob([result], { type: 'audio/mpeg' });
+}
+
+function audioBufferToMp3BlobSync(audioBuffer: AudioBuffer): Blob {
+  const channels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const left = floatToInt16(audioBuffer.getChannelData(0));
+  const right =
+    channels > 1 ? floatToInt16(audioBuffer.getChannelData(1)) : left;
+
+  const encoder = new lamejs.Mp3Encoder(channels, sampleRate, MP3_BITRATE_KBPS);
+  const mp3Chunks: Int8Array[] = [];
+
+  for (let i = 0; i < left.length; i += MP3_SAMPLE_BLOCK) {
+    const leftChunk = left.subarray(i, i + MP3_SAMPLE_BLOCK);
+    const rightChunk = right.subarray(i, i + MP3_SAMPLE_BLOCK);
+    const mp3buf = encoder.encodeBuffer(leftChunk, rightChunk);
+    if (mp3buf.length > 0) mp3Chunks.push(mp3buf);
+  }
+  const final = encoder.flush();
+  if (final.length > 0) mp3Chunks.push(final);
+
+  const totalLength = mp3Chunks.reduce((acc, c) => acc + c.length, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of mp3Chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return new Blob([result], { type: 'audio/mpeg' });
 }
 
 /**

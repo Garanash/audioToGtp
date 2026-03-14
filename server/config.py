@@ -25,3 +25,6 @@ MIDI_STATUS_KEY_PREFIX = "midi:status:"
 GTP_INPUT_KEY_PREFIX = "gtp:input:"
 GTP_RESULT_KEY_PREFIX = "gtp:result:"
 GTP_STATUS_KEY_PREFIX = "gtp:status:"
+
+PROGRESS_KEY_PREFIX = "progress:"
+ERROR_KEY_PREFIX = "error:"

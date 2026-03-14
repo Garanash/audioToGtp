@@ -65,16 +65,47 @@ sshpass -p "$DEPLOY_PASS" rsync -avz --delete dist/ "${HOST}:${REMOTE_DIR}/dist/
 echo "=== 6. Установка зависимостей Python на сервере ==="
 sshpass -p "$DEPLOY_PASS" ssh "$HOST" "cd ${REMOTE_DIR} && (test -d .venv || python3 -m venv .venv) && .venv/bin/pip install -q -r server/requirements.txt"
 
+echo "=== 6.1. Redis и Celery worker ==="
+sshpass -p "$DEPLOY_PASS" ssh "$HOST" "
+  (command -v redis-server >/dev/null || apt-get update && apt-get install -y redis-server) 2>/dev/null || true
+  (systemctl start redis-server 2>/dev/null || systemctl start redis 2>/dev/null || true)
+  (systemctl enable redis-server 2>/dev/null || systemctl enable redis 2>/dev/null || true)
+  touch ${REMOTE_DIR}/.env
+  sed -i.bak 's/^USE_CELERY=.*/USE_CELERY=1/' ${REMOTE_DIR}/.env 2>/dev/null || true
+  grep -q '^USE_CELERY=' ${REMOTE_DIR}/.env 2>/dev/null || echo 'USE_CELERY=1' >> ${REMOTE_DIR}/.env
+  sed -i.bak 's|^REDIS_URL=.*|REDIS_URL=redis://127.0.0.1:6379/0|' ${REMOTE_DIR}/.env 2>/dev/null || true
+  grep -q '^REDIS_URL=' ${REMOTE_DIR}/.env 2>/dev/null || echo 'REDIS_URL=redis://127.0.0.1:6379/0' >> ${REMOTE_DIR}/.env
+"
+
 echo "=== 7. Настройка nginx ==="
-sshpass -p "$DEPLOY_PASS" scp deploy/nginx-musicvibe.conf "${HOST}:/tmp/nginx-musicvibe.conf"
+if sshpass -p "$DEPLOY_PASS" ssh "$HOST" "test -f /etc/letsencrypt/live/musicvibe.ru/fullchain.pem" 2>/dev/null; then
+  sshpass -p "$DEPLOY_PASS" scp deploy/nginx-musicvibe-ssl.conf "${HOST}:/tmp/nginx-musicvibe.conf"
+else
+  sshpass -p "$DEPLOY_PASS" scp deploy/nginx-musicvibe.conf "${HOST}:/tmp/nginx-musicvibe.conf"
+fi
 sshpass -p "$DEPLOY_PASS" ssh "$HOST" "
   cp /tmp/nginx-musicvibe.conf ${NGINX_CONF} 2>/dev/null || cp /tmp/nginx-musicvibe.conf /etc/nginx/conf.d/musicvibe.conf
   nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || echo 'Проверьте nginx вручную'
 "
 
-echo "=== 8. Настройка и запуск systemd сервиса ==="
+echo "=== 8. Настройка и запуск systemd сервисов ==="
 sshpass -p "$DEPLOY_PASS" scp deploy/gtpconverter.service "${HOST}:/tmp/gtpconverter.service"
-sshpass -p "$DEPLOY_PASS" ssh "$HOST" "sed -e 's|/opt/gtpconverter|${REMOTE_DIR}|g' /tmp/gtpconverter.service > /etc/systemd/system/gtpconverter.service && systemctl daemon-reload && systemctl enable gtpconverter && systemctl restart gtpconverter && systemctl status gtpconverter --no-pager || true"
+sshpass -p "$DEPLOY_PASS" scp deploy/celery-worker.service "${HOST}:/tmp/celery-worker.service"
+sshpass -p "$DEPLOY_PASS" ssh "$HOST" "
+  sed -e 's|/opt/gtpconverter|${REMOTE_DIR}|g' /tmp/gtpconverter.service > /etc/systemd/system/gtpconverter.service
+  sed -e 's|/opt/gtpconverter|${REMOTE_DIR}|g' /tmp/celery-worker.service > /etc/systemd/system/celery-worker.service
+  systemctl daemon-reload
+  systemctl enable gtpconverter celery-worker 2>/dev/null || systemctl enable gtpconverter
+  systemctl restart gtpconverter
+  systemctl restart celery-worker 2>/dev/null || true
+  systemctl status gtpconverter --no-pager || true
+  systemctl status celery-worker --no-pager 2>/dev/null || true
+"
+echo "=== 9. Резервное копирование БД (cron 2 раза в сутки) ==="
+sshpass -p "$DEPLOY_PASS" ssh "$HOST" "
+  chmod +x ${REMOTE_DIR}/scripts/backup-db.sh 2>/dev/null || true
+  (crontab -l 2>/dev/null | grep -v backup-db.sh; echo '0 6,18 * * * ${REMOTE_DIR}/scripts/backup-db.sh') | crontab - 2>/dev/null || true
+"
 
 echo "=== Готово! ==="
 echo "Сервис: https://musicvibe.ru"

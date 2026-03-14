@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { audioBufferToWavBlob, fileToAudioBuffer } from '../utils/audioBuffer';
+import {
+  audioBufferToMp3BlobAsync,
+  audioBufferToWavBlob,
+  fileToAudioBuffer,
+  getWaveform,
+} from '../utils/audioBuffer';
 import { useAudioSeparation } from '../hooks/useAudioSeparation';
+import { useGuestLimits, type GuestActionId } from '../contexts/GuestLimitsContext';
 import { UploadDropzone } from './common/UploadDropzone';
 import { ProgressInlineBar } from './common/ProgressInlineBar';
+import { GuestLimitModal } from './GuestLimitModal';
 
 export type ToolMode =
   | 'all'
@@ -20,6 +27,13 @@ interface ToolsTabProps {
 }
 
 type MeterSignature = '3/4' | '4/4';
+
+interface JoinTrack {
+  id: string;
+  file: File;
+  duration: number;
+  waveform: number[];
+}
 
 function downloadBlob(blob: Blob, filename: string) {
   const a = document.createElement('a');
@@ -297,7 +311,7 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
   const [meterConfidence, setMeterConfidence] = useState(0);
   const [cutStart, setCutStart] = useState(0);
   const [cutEnd, setCutEnd] = useState(30);
-  const [joinFiles, setJoinFiles] = useState<File[]>([]);
+  const [joinTracks, setJoinTracks] = useState<JoinTrack[]>([]);
   const [karaokeBusy, setKaraokeBusy] = useState(false);
   const [karaokeProgress, setKaraokeProgress] = useState(0);
   const [karaokePreviewUrl, setKaraokePreviewUrl] = useState<string | null>(null);
@@ -329,12 +343,27 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
   const audioRef = useRef<{ ctx: AudioContext; source: AudioBufferSourceNode; startedAt: number; offset: number } | null>(null);
   const pitcherRafRef = useRef<number | null>(null);
   const { separate, stems, isLoading, progress: separationProgress } = useAudioSeparation();
+  const { canPerform, markUsed } = useGuestLimits();
+  const [limitModalAction, setLimitModalAction] = useState<GuestActionId | null>(null);
+
+  const GUEST_ACTION_LABELS: Record<GuestActionId, string> = {
+    separation: 'Разделение на дорожки',
+    conversion: 'Конвертация в GTP',
+    joiner: 'Джоинер',
+    'vocal-remover': 'Удаление вокала',
+    pitcher: 'Pitcher',
+    'time-signature': 'Тактовый размер',
+    cutter: 'Резак',
+    recorder: 'Диктофон',
+    karaoke: 'Караоке',
+    effects: 'Эффекты',
+  };
 
   const duration = useMemo(() => buffer?.duration ?? 0, [buffer]);
   const hasPitcherData = Boolean(buffer);
   const joinedTotalDuration = useMemo(
-    () => joinFiles.reduce((sum, f) => sum + (Number((f as File & { _duration?: number })._duration) || 0), 0),
-    [joinFiles]
+    () => joinTracks.reduce((sum, t) => sum + t.duration, 0),
+    [joinTracks]
   );
   const cutterWaveform = useMemo(() => (buffer ? buildWaveformBars(buffer, 220) : []), [buffer]);
   const activeOverlayLoader = useMemo(() => {
@@ -409,6 +438,11 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
 
   const onPickFile = useCallback(async (picked: File | null) => {
     if (!picked) return;
+    if ((mode === 'pitcher' || mode === 'all') && !canPerform('pitcher')) {
+      setLimitModalAction('pitcher');
+      return;
+    }
+    if (mode === 'pitcher' || mode === 'all') markUsed('pitcher');
     const decoded = await fileToAudioBuffer(picked);
     setPitcherProgress(24);
     setFile(picked);
@@ -428,7 +462,7 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
     setCutEnd(Math.min(30, decoded.duration));
     setPitcherPosition(0);
     await analyzePitcherTrack(decoded, picked);
-  }, [originalPreviewUrl, cutResultUrl, joinResultUrl, denoiseResultUrl, analyzePitcherTrack]);
+  }, [originalPreviewUrl, cutResultUrl, joinResultUrl, denoiseResultUrl, analyzePitcherTrack, canPerform, markUsed, mode]);
 
   const stopPitcher = useCallback(() => {
     if (pitcherRafRef.current) {
@@ -489,6 +523,11 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
 
   const removeVocals = useCallback(async () => {
     if (!file) return;
+    if (!canPerform('vocal-remover')) {
+      setLimitModalAction('vocal-remover');
+      return;
+    }
+    markUsed('vocal-remover');
     setInstrumentalBusy(true);
     try {
       const result = await separate(file);
@@ -502,17 +541,27 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
     } finally {
       setInstrumentalBusy(false);
     }
-  }, [file, separate, instrumentalPreviewUrl]);
+  }, [file, separate, instrumentalPreviewUrl, canPerform, markUsed]);
 
   const analyzeMeter = useCallback(() => {
     if (!buffer) return;
+    if (!canPerform('time-signature')) {
+      setLimitModalAction('time-signature');
+      return;
+    }
+    markUsed('time-signature');
     const { meter, confidence } = detectTimeSignatureWithConfidence(buffer);
     setTimeSignature(meter);
     setMeterConfidence(confidence);
-  }, [buffer]);
+  }, [buffer, canPerform, markUsed]);
 
   const exportCut = useCallback(() => {
     if (!buffer) return;
+    if (!canPerform('cutter')) {
+      setLimitModalAction('cutter');
+      return;
+    }
+    markUsed('cutter');
     setCutBusy(true);
     setCutProgress(8);
     const start = clamp(cutStart, 0, Math.max(0, duration - 0.1));
@@ -534,27 +583,30 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
     setCutResultUrl(url);
     setCutProgress(100);
     window.setTimeout(() => setCutBusy(false), 180);
-  }, [buffer, cutStart, cutEnd, duration, file, cutResultUrl]);
+  }, [buffer, cutStart, cutEnd, duration, file, cutResultUrl, canPerform, markUsed]);
 
   const addJoinFiles = useCallback(async (files: FileList | null) => {
     if (!files) return;
-    const next = await Promise.all(
-      Array.from(files).map(async (f) => {
+    const next: JoinTrack[] = await Promise.all(
+      Array.from(files).map(async (f, i) => {
         const b = await fileToAudioBuffer(f);
-        const clone = f as File & { _duration?: number };
-        clone._duration = b.duration;
-        return clone;
+        return {
+          id: `${Date.now()}-${i}-${f.name}`,
+          file: f,
+          duration: b.duration,
+          waveform: getWaveform(b),
+        };
       })
     );
-    setJoinFiles((prev) => [...prev, ...next]);
+    setJoinTracks((prev) => [...prev, ...next]);
   }, []);
 
-  const removeJoinFile = useCallback((idx: number) => {
-    setJoinFiles((prev) => prev.filter((_, i) => i !== idx));
+  const removeJoinTrack = useCallback((idx: number) => {
+    setJoinTracks((prev) => prev.filter((_, i) => i !== idx));
   }, []);
 
-  const moveJoinFile = useCallback((from: number, to: number) => {
-    setJoinFiles((prev) => {
+  const moveJoinTrack = useCallback((from: number, to: number) => {
+    setJoinTracks((prev) => {
       if (from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
       const copy = [...prev];
       const [item] = copy.splice(from, 1);
@@ -563,11 +615,19 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
     });
   }, []);
 
+  const [joinDragOver, setJoinDragOver] = useState(false);
+  const [joinDraggedIdx, setJoinDraggedIdx] = useState<number | null>(null);
+
   const joinMultiTrack = useCallback(async () => {
-    if (joinFiles.length < 2) return;
+    if (joinTracks.length < 2) return;
+    if (!canPerform('joiner')) {
+      setLimitModalAction('joiner');
+      return;
+    }
+    markUsed('joiner');
     setJoinBusy(true);
     setJoinProgress(10);
-    const buffers = await Promise.all(joinFiles.map((f) => fileToAudioBuffer(f)));
+    const buffers = await Promise.all(joinTracks.map((t) => fileToAudioBuffer(t.file)));
     setJoinProgress(42);
     const maxLen = Math.max(...buffers.map((b) => b.length));
     const sampleRate = Math.max(...buffers.map((b) => b.sampleRate));
@@ -581,15 +641,14 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
         for (let i = 0; i < src.length; i++) target[i] += src[i] / buffers.length;
       }
     }
-    setJoinProgress(82);
-    const blob = audioBufferToWavBlob(out);
+    const blob = await audioBufferToMp3BlobAsync(out, (p) => setJoinProgress(82 + (p * 18) / 100));
     if (joinResultUrl) URL.revokeObjectURL(joinResultUrl);
     const url = URL.createObjectURL(blob);
     setJoinResultBlob(blob);
     setJoinResultUrl(url);
     setJoinProgress(100);
     window.setTimeout(() => setJoinBusy(false), 180);
-  }, [joinFiles, joinResultUrl]);
+  }, [joinTracks, joinResultUrl, canPerform, markUsed]);
 
   const startRecording = useCallback(async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -615,6 +674,11 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
 
   const denoiseRecording = useCallback(async () => {
     if (!recordedBlob) return;
+    if (!canPerform('recorder')) {
+      setLimitModalAction('recorder');
+      return;
+    }
+    markUsed('recorder');
     setDenoiseBusy(true);
     setDenoiseProgress(12);
     const arr = await recordedBlob.arrayBuffer();
@@ -636,10 +700,15 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
     setDenoiseResultUrl(url);
     setDenoiseProgress(100);
     window.setTimeout(() => setDenoiseBusy(false), 180);
-  }, [recordedBlob, denoiseResultUrl]);
+  }, [recordedBlob, denoiseResultUrl, canPerform, markUsed]);
 
   const createKaraoke = useCallback(async () => {
     if (!file) return;
+    if (!canPerform('karaoke')) {
+      setLimitModalAction('karaoke');
+      return;
+    }
+    markUsed('karaoke');
     setKaraokeBusy(true);
     setKaraokeProgress(8);
     try {
@@ -660,7 +729,7 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
     } finally {
       window.setTimeout(() => setKaraokeBusy(false), 180);
     }
-  }, [file, separate, karaokePreviewUrl]);
+  }, [file, separate, karaokePreviewUrl, canPerform, markUsed]);
 
   const isMode = (value: Exclude<ToolMode, 'all'>) => mode === 'all' || mode === value;
 
@@ -680,6 +749,11 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      <GuestLimitModal
+        isOpen={limitModalAction !== null}
+        onClose={() => setLimitModalAction(null)}
+        actionName={limitModalAction ? GUEST_ACTION_LABELS[limitModalAction] : ''}
+      />
       {activeOverlayLoader && (
         <div className="fixed inset-0 z-[88] flex items-center justify-center bg-[#0A0A0A]/55 backdrop-blur-[2px]">
           <div className="w-full max-w-md px-4">
@@ -955,34 +1029,114 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
         )}
 
         {isMode('joiner') && (
-        <div className={buildToolCardClass(mode, 'min-h-[360px]')}>
-          <div className="mb-3 rounded-xl border border-[#2A2A2A] bg-[#0D0D0D] p-3">
+        <div className={buildToolCardClass(mode, 'min-h-[420px]')}>
+          <div
+            onDrop={(e) => {
+              e.preventDefault();
+              setJoinDragOver(false);
+              const files = e.dataTransfer.files;
+              if (files?.length) void addJoinFiles(files);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setJoinDragOver(true);
+            }}
+            onDragLeave={() => setJoinDragOver(false)}
+            className={`mb-4 rounded-xl border-2 border-dashed p-4 transition-colors ${
+              joinDragOver ? 'border-[#8A2BE2] bg-[#8A2BE2]/10' : 'border-[#2A2A2A] bg-[#0D0D0D] hover:border-[#3A3A3A]'
+            }`}
+          >
             <input
               type="file"
               multiple
               accept=".wav,.mp3,.flac,.m4a,audio/*"
               onChange={(e) => void addJoinFiles(e.target.files)}
-              className="w-full text-xs text-[#A0A0A0]"
+              className="hidden"
+              id="joiner-file-input"
             />
-            <p className="mt-2 text-xs text-[#7F7F7F]">Добавьте 2+ файла, упорядочьте список и соедините в один мультитрек.</p>
-          </div>
-          <div className="mb-3 max-h-48 space-y-2 overflow-auto rounded-xl border border-[#2A2A2A] bg-[#0D0D0D] p-2">
-            {joinFiles.length === 0 && <p className="px-2 py-1 text-xs text-[#7F7F7F]">Файлы еще не добавлены</p>}
-            {joinFiles.map((f, idx) => (
-              <div key={`${f.name}-${idx}`} className="flex items-center justify-between gap-2 rounded-lg border border-[#2A2A2A] bg-[#131313] px-2 py-1.5">
-                <span className="truncate text-xs text-[#E0E0E0]">{idx + 1}. {f.name}</span>
-                <div className="flex items-center gap-1">
-                  <button onClick={() => moveJoinFile(idx, idx - 1)} disabled={idx === 0} className="rounded border border-[#2A2A2A] px-2 text-[10px] text-[#A0A0A0] disabled:opacity-40">↑</button>
-                  <button onClick={() => moveJoinFile(idx, idx + 1)} disabled={idx === joinFiles.length - 1} className="rounded border border-[#2A2A2A] px-2 text-[10px] text-[#A0A0A0] disabled:opacity-40">↓</button>
-                  <button onClick={() => removeJoinFile(idx)} className="rounded border border-red-500/40 px-2 text-[10px] text-red-300">x</button>
-                </div>
+            <label htmlFor="joiner-file-input" className="flex cursor-pointer flex-col items-center justify-center gap-2 py-2 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full border border-[#2A2A2A] bg-[#141414]">
+                <svg className="h-5 w-5 text-[#8A2BE2]" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 3a1 1 0 0 1 1 1v7h7a1 1 0 1 1 0 2h-7v7a1 1 0 1 1-2 0v-7H4a1 1 0 1 1 0-2h7V4a1 1 0 0 1 1-1Z" />
+                </svg>
               </div>
-            ))}
+              <p className="text-sm font-medium text-[#E0E0E0]">Перетащите треки сюда или нажмите</p>
+              <p className="text-xs text-[#7F7F7F]">WAV, MP3, FLAC, M4A — 2+ файла</p>
+            </label>
           </div>
+
+          <div className="mb-4 min-h-[200px] space-y-2 rounded-xl border border-[#2A2A2A] bg-[#0D0D0D] p-3">
+            {joinTracks.length === 0 ? (
+              <div className="flex min-h-[180px] flex-col items-center justify-center gap-2 text-center text-[#7F7F7F]">
+                <div className="h-12 w-12 rounded-lg border border-dashed border-[#2A2A2A] bg-[#111111]" />
+                <p className="text-xs">Дорожки появятся здесь</p>
+              </div>
+            ) : (
+              joinTracks.map((track, idx) => (
+                <div
+                  key={track.id}
+                  draggable
+                  onDragStart={() => setJoinDraggedIdx(idx)}
+                  onDragEnd={() => setJoinDraggedIdx(null)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (joinDraggedIdx !== null && joinDraggedIdx !== idx) {
+                      moveJoinTrack(joinDraggedIdx, idx);
+                      setJoinDraggedIdx(null);
+                    }
+                  }}
+                  className={`flex items-center gap-2 rounded-lg border bg-[#131313] p-2 transition-all ${
+                    joinDraggedIdx === idx ? 'border-[#8A2BE2] opacity-60' : 'border-[#2A2A2A]'
+                  }`}
+                >
+                  <div
+                    className="cursor-grab touch-none select-none rounded p-1 text-[#A0A0A0] hover:text-[#E0E0E0]"
+                    title="Перетащите для изменения порядка"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 6h2v2H8V6zm0 5h2v2H8v-2zm0 5h2v2H8v-2zm5-10h2v2h-2V6zm0 5h2v2h-2v-2zm0 5h2v2h-2v-2z" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="truncate text-xs font-medium text-[#E0E0E0]">{track.file.name}</span>
+                      <span className="shrink-0 text-[10px] text-[#A0A0A0]">{formatTimeCompact(track.duration)}</span>
+                    </div>
+                    <div className="flex h-10 items-end gap-px rounded overflow-hidden bg-[#0A0A0A] px-1 py-1" style={{ minHeight: 40 }}>
+                      {track.waveform.slice(0, 100).map((v, i) => (
+                        <div
+                          key={i}
+                          className="min-w-[2px] flex-1 rounded-[1px] bg-[#8A2BE2]/60"
+                          style={{ height: `${Math.max(4, v * 60)}%` }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => removeJoinTrack(idx)}
+                    className="shrink-0 rounded p-1.5 text-[#7F7F7F] hover:bg-red-500/20 hover:text-red-300"
+                    title="Удалить"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+                    </svg>
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-[#A0A0A0]">Треков: {joinFiles.length} · Суммарно: {joinedTotalDuration.toFixed(1)}s</span>
-            <button onClick={() => void joinMultiTrack()} disabled={joinFiles.length < 2 || joinBusy} className="rounded-lg border border-[#2A2A2A] px-3 py-1.5 text-xs text-[#E0E0E0] disabled:opacity-50">
-              {joinBusy ? 'Склеиваем...' : 'Join и скачать'}
+            <span className="text-xs text-[#A0A0A0]">
+              Треков: {joinTracks.length} · Суммарно: {joinedTotalDuration.toFixed(1)}s
+            </span>
+            <button
+              onClick={() => void joinMultiTrack()}
+              disabled={joinTracks.length < 2 || joinBusy}
+              className="rounded-full bg-gradient-to-r from-[#8A2BE2] to-[#4B0082] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:scale-105 disabled:scale-100 disabled:opacity-50"
+            >
+              {joinBusy ? 'Склеиваем...' : 'Соединить → MP3'}
             </button>
           </div>
           {joinBusy && (
@@ -995,11 +1149,12 @@ export function ToolsTab({ mode = 'all' }: ToolsTabProps) {
               <AudioComparePlayer
                 originalUrl={null}
                 resultUrl={joinResultUrl}
-                resultLabel="Склеенный мультитрек"
+                resultLabel="Склеенный мультитрек (MP3)"
                 onDownload={() => {
                   if (!joinResultBlob) return;
-                  downloadBlob(joinResultBlob, 'multitrack-joined.wav');
+                  downloadBlob(joinResultBlob, 'multitrack-joined.mp3');
                 }}
+                downloadLabel="Скачать MP3"
               />
             </div>
           )}

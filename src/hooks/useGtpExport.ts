@@ -21,6 +21,7 @@ interface AsyncTaskEvent {
   type: 'gtp';
   status: AsyncTaskStatus;
   title: string;
+  progress?: number;
 }
 interface UseGtpExportOptions {
   onAsyncTask?: (task: AsyncTaskEvent) => void;
@@ -33,9 +34,18 @@ async function pollGtpResult(
   for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
     const statusRes = await fetch(`/api/convert-to-gtp/status/${taskId}`);
     if (statusRes.ok) {
-      const statusData = (await statusRes.json().catch(() => ({}))) as { status?: string };
+      const statusData = (await statusRes.json().catch(() => ({}))) as {
+        status?: string;
+        progress?: number;
+      };
       if (statusData.status) {
-        onTask?.({ id: taskId, type: 'gtp', status: statusData.status as AsyncTaskStatus, title: 'GTP экспорт' });
+        onTask?.({
+          id: taskId,
+          type: 'gtp',
+          status: statusData.status as AsyncTaskStatus,
+          title: 'GTP экспорт',
+          progress: statusData.progress,
+        });
       }
       if (statusData.status === 'completed') {
         const resultRes = await fetch(`/api/convert-to-gtp/result/${taskId}`);

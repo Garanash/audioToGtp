@@ -64,6 +64,7 @@ export function UploadDropzone({
       onClick={(e) => {
         const target = e.target as HTMLElement;
         if (target.closest('[data-upload-no-open="true"]')) return;
+        if (target.closest(`label[for="${inputId}"]`)) return;
         openFileDialog();
       }}
       className={`relative overflow-hidden rounded-2xl border-2 border-dashed transition-all duration-300 ${

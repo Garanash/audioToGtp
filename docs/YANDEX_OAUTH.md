@@ -1,6 +1,13 @@
-# Настройка Yandex OAuth для musicvibe.ru
+# Настройка авторизации для musicvibe.ru
 
-## Платформы приложений (Шаг 2 из 4)
+## Firebase Console (обязательно)
+
+1. **Sign-in method**: включите **Email/Password**. Google через Firebase не нужен — используется backend OAuth.
+2. **Authorized domains**: добавьте `musicvibe.ru` и `www.musicvibe.ru`.
+
+---
+
+## Yandex OAuth — платформы приложений (Шаг 2 из 4)
 
 ### Redirect URI
 ```

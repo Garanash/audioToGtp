@@ -23,16 +23,16 @@ export function SupportTab() {
       className="space-y-6"
     >
       <div className="rounded-2xl border border-[#2A2A2A] bg-[#111111] p-8">
-        <h3 className="mb-2 text-2xl font-bold tracking-tight text-[#E0E0E0]">Поддержка Musca Studio</h3>
+        <h3 className="mb-2 text-2xl font-bold tracking-tight text-[#E0E0E0]">Поддержка Musicvibe</h3>
         <p className="mb-6 text-[#A0A0A0]">Ответим по качеству распознавания, ошибкам и настройке pipeline.</p>
         <div className="mb-6 grid gap-3 md:grid-cols-3">
-          <a href="mailto:support@musca.studio" className="rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] p-4 transition-colors hover:border-[#8A2BE2]">
+          <a href="mailto:support@musicvibe.ru" className="rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] p-4 transition-colors hover:border-[#8A2BE2]">
             <p className="text-sm font-semibold text-[#E0E0E0]">Email</p>
-            <p className="mt-1 text-sm text-[#A0A0A0]">support@musca.studio</p>
+            <p className="mt-1 text-sm text-[#A0A0A0]">support@musicvibe.ru</p>
           </a>
           <a href="#" className="rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] p-4 transition-colors hover:border-[#8A2BE2]">
             <p className="text-sm font-semibold text-[#E0E0E0]">Telegram</p>
-            <p className="mt-1 text-sm text-[#A0A0A0]">@musca_support</p>
+            <p className="mt-1 text-sm text-[#A0A0A0]">@musicvibe</p>
           </a>
           <a href="#" className="rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] p-4 transition-colors hover:border-[#8A2BE2]">
             <p className="text-sm font-semibold text-[#E0E0E0]">Статус системы</p>

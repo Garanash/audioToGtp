@@ -2,27 +2,12 @@
  * Хедер в стиле Moises: мега-меню с карточками, иконками, описаниями, анимацией и соцсетями.
  */
 
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { AuthModal } from './AuthModal';
-import { MegaDropdown } from './nav/MegaDropdown';
-import {
-  MADE_FOR_CARDS,
-  FEATURES_CARDS,
-  PLATFORMS_CARDS,
-  MEDIA_CARDS,
-  MediaDropdownFooter,
-} from './nav/navConfig';
 
-type DropdownKey = 'made-for' | 'features' | 'platforms' | 'media' | 'user';
-
-const MEGA_MENUS: { key: DropdownKey; label: string }[] = [
-  { key: 'made-for', label: 'Сделано для' },
-  { key: 'features', label: 'Возможности' },
-  { key: 'platforms', label: 'Платформы' },
-  { key: 'media', label: 'Медиаматериалы' },
-];
+type DropdownKey = 'user';
 
 function ChevronDown({ className }: { className?: string }) {
   return (
@@ -38,31 +23,11 @@ function ChevronDown({ className }: { className?: string }) {
   );
 }
 
-function CompactIconButton({
-  title,
-  onClick,
-  children,
-}: {
-  title: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className="rounded-full border border-[#2A2A2A] bg-[#111111] p-1.5 text-[#E0E0E0] transition-colors hover:border-[#8A2BE2] hover:text-white"
-    >
-      {children}
-    </button>
-  );
-}
-
 export function Header() {
   const { user, isLoading, signOut } = useAuth();
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [openCabinetAfterAuth, setOpenCabinetAfterAuth] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
   const [isCompact, setIsCompact] = useState(false);
   const [forceExpanded, setForceExpanded] = useState(false);
@@ -108,6 +73,17 @@ export function Header() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ mode?: 'login' | 'register' }>).detail;
+      setAuthMode(detail?.mode ?? 'register');
+      setAuthModalOpen(true);
+      expandHeader();
+    };
+    window.addEventListener('musca:openAuthModal', handler);
+    return () => window.removeEventListener('musca:openAuthModal', handler);
+  }, []);
+
   const openLogin = () => {
     expandHeader();
     setAuthMode('login');
@@ -117,26 +93,6 @@ export function Header() {
     expandHeader();
     setAuthMode('register');
     setAuthModalOpen(true);
-  };
-
-  const getCards = (key: DropdownKey) => {
-    switch (key) {
-      case 'made-for':
-        return MADE_FOR_CARDS;
-      case 'features':
-        return FEATURES_CARDS;
-      case 'platforms':
-        return PLATFORMS_CARDS;
-      case 'media':
-        return MEDIA_CARDS;
-      default:
-        return [];
-    }
-  };
-
-  const getFooter = (key: DropdownKey) => {
-    if (key === 'media') return <MediaDropdownFooter />;
-    return undefined;
   };
 
   const compactMode = isCompact && !forceExpanded;
@@ -152,103 +108,30 @@ export function Header() {
       <div className={`mx-auto flex max-w-[1400px] items-center justify-between px-4 md:px-6 lg:px-8 ${compactMode ? 'h-14 gap-4' : 'h-20 gap-10'}`}>
         <a href="#" onClick={expandHeader} className="flex shrink-0 items-center transition-opacity hover:opacity-90">
           <img
-            src={`${import.meta.env.BASE_URL}musca-logo.png`}
-            alt="Musca"
-            className={`rounded-md object-cover transition-all ${compactMode ? 'h-14 w-14' : 'h-20 w-20'}`}
+            src={`${import.meta.env.BASE_URL}musicvibe-logo.png`}
+            alt="Musicvibe"
+            className={`rounded-md object-contain transition-all ${compactMode ? 'h-10' : 'h-12'}`}
           />
         </a>
 
-        <nav className="flex shrink-0 items-center gap-0.5" ref={dropdownRef}>
-          {compactMode ? (
-            <div className="flex items-center gap-1">
-              <CompactIconButton
-                title="Сделано для"
-                onClick={() => {
-                  expandHeader();
-                  setOpenDropdown('made-for');
-                }}
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <path d="M12 3 3 7.5 12 12l9-4.5L12 3Z" />
-                  <path d="M3 12.5 12 17l9-4.5" />
-                  <path d="M3 17.5 12 22l9-4.5" />
-                </svg>
-              </CompactIconButton>
-              <CompactIconButton
-                title="Возможности"
-                onClick={() => {
-                  expandHeader();
-                  setOpenDropdown('features');
-                }}
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <path d="M12 2v4M12 18v4M4 12h4m8 0h4M5.6 5.6l2.8 2.8m7.2 7.2 2.8 2.8m0-12.8-2.8 2.8m-7.2 7.2-2.8 2.8" />
-                  <circle cx="12" cy="12" r="3.5" />
-                </svg>
-              </CompactIconButton>
-              <CompactIconButton
-                title="Платформы"
-                onClick={() => {
-                  expandHeader();
-                  setOpenDropdown('platforms');
-                }}
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <rect x="3" y="4" width="18" height="12" rx="2" />
-                  <path d="M8 20h8M12 16v4" />
-                </svg>
-              </CompactIconButton>
-              <CompactIconButton
-                title="Медиаматериалы"
-                onClick={() => {
-                  expandHeader();
-                  setOpenDropdown('media');
-                }}
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <path d="m4 7 8-4 8 4-8 4-8-4Z" />
-                  <path d="M4 12l8 4 8-4M4 17l8 4 8-4" />
-                </svg>
-              </CompactIconButton>
-            </div>
-          ) : (
-            <>
-          {MEGA_MENUS.map(({ key, label }) => (
-              <MegaDropdown
-                key={key}
-                label={label}
-                cards={getCards(key)}
-                isOpen={openDropdown === key}
-                onClose={() => setOpenDropdown(null)}
-                footer={getFooter(key)}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    expandHeader();
-                    setOpenDropdown((v) => (v === key ? null : key));
-                  }}
-                  className="flex items-center gap-1 rounded-lg px-3 py-2.5 text-sm font-medium text-[#A0A0A0] transition-all duration-200 hover:bg-[#1A1A1A] hover:text-[#E0E0E0]"
-                >
-                  {label}
-                  <ChevronDown
-                    className={`h-4 w-4 transition-transform duration-200 ${openDropdown === key ? 'rotate-180' : ''}`}
-                  />
-                </button>
-              </MegaDropdown>
-          ))}
-          <a
-            href="#guides"
-            onClick={expandHeader}
-            className="rounded-lg px-3 py-2.5 text-sm font-medium text-[#A0A0A0] transition-all duration-200 hover:bg-[#1A1A1A] hover:text-[#E0E0E0]"
-          >
-            Руководства
-          </a>
-            </>
-          )}
-        </nav>
 
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              expandHeader();
+              if (user) {
+                window.dispatchEvent(new CustomEvent('musca:openCabinet'));
+              } else {
+                setOpenCabinetAfterAuth(true);
+                openLogin();
+              }
+            }}
+            className="rounded-lg px-3 py-2 text-sm font-medium text-[#A0A0A0] transition-all duration-200 hover:bg-[#1A1A1A] hover:text-[#E0E0E0]"
+            aria-label="Личный кабинет"
+          >
+            Личный кабинет
+          </button>
           {!isLoading &&
               (user ? (
                 <div className="relative flex items-center gap-3" ref={dropdownRef}>
@@ -296,11 +179,15 @@ export function Header() {
                           )}
                         </div>
                         <a
-                          href="#"
+                          href="#cabinet"
                           className="block px-4 py-2.5 text-sm text-[#E0E0E0] transition-colors hover:bg-[#1A1A1A]"
-                          onClick={() => setOpenDropdown(null)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setOpenDropdown(null);
+                            window.dispatchEvent(new CustomEvent('musca:openCabinet'));
+                          }}
                         >
-                          Мои проекты
+                          Личный кабинет
                         </a>
                         <button
                           type="button"
@@ -338,7 +225,16 @@ export function Header() {
       </div>
       <AuthModal
         isOpen={authModalOpen}
-        onClose={() => setAuthModalOpen(false)}
+        onClose={() => {
+          setAuthModalOpen(false);
+          setOpenCabinetAfterAuth(false);
+        }}
+        onSuccess={() => {
+          if (openCabinetAfterAuth) {
+            setOpenCabinetAfterAuth(false);
+            window.dispatchEvent(new CustomEvent('musca:openCabinet'));
+          }
+        }}
         mode={authMode}
       />
     </header>

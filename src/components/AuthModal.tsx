@@ -6,18 +6,16 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 
-type TabType = 'email' | 'social';
-
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void;
   mode?: 'login' | 'register';
 }
 
-export function AuthModal({ isOpen, onClose, mode = 'login' }: AuthModalProps) {
+export function AuthModal({ isOpen, onClose, onSuccess, mode = 'login' }: AuthModalProps) {
   const { signInWithGoogle, signInWithYandex, signInWithEmail, signUpWithEmail, isConfigured } = useAuth();
   const [hint, setHint] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabType>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -58,6 +56,7 @@ export function AuthModal({ isOpen, onClose, mode = 'login' }: AuthModalProps) {
       } else {
         await signInWithEmail(email, password);
       }
+      onSuccess?.();
       onClose();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Ошибка входа';
@@ -80,7 +79,9 @@ export function AuthModal({ isOpen, onClose, mode = 'login' }: AuthModalProps) {
       setHint('Скопируйте .env.example в .env и вставьте ключи из Firebase Console (Project settings → Your apps). Включите Google в Authentication → Sign-in method. Затем перезапустите: npm run dev');
       return;
     }
+    if (onSuccess) sessionStorage.setItem('musca_openCabinetAfterAuth', '1');
     await signInWithGoogle();
+    onSuccess?.();
     onClose();
   };
 
@@ -89,7 +90,10 @@ export function AuthModal({ isOpen, onClose, mode = 'login' }: AuthModalProps) {
       setHint('Сначала настройте Firebase (см. подсказку для Google).');
       return;
     }
+    if (onSuccess) sessionStorage.setItem('musca_openCabinetAfterAuth', '1');
     await signInWithYandex();
+    onSuccess?.();
+    onClose();
   };
 
   return (
@@ -115,25 +119,33 @@ export function AuthModal({ isOpen, onClose, mode = 'login' }: AuthModalProps) {
             Сохраняйте проекты и возвращайтесь к ним с любого устройства.
           </p>
 
-          <div className="mt-6 flex gap-2 rounded-xl border border-[#2A2A2A] bg-[#0D0D0D] p-1">
-            <button
-              type="button"
-              onClick={() => setTab('email')}
-              className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === 'email' ? 'bg-[#1A1A1A] text-[#E0E0E0]' : 'text-[#A0A0A0] hover:text-[#E0E0E0]'}`}
-            >
-              Почта
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab('social')}
-              className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === 'social' ? 'bg-[#1A1A1A] text-[#E0E0E0]' : 'text-[#A0A0A0] hover:text-[#E0E0E0]'}`}
-            >
-              Соцсети
-            </button>
-          </div>
+          <div className="mt-6 flex flex-col gap-4">
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={handleGoogle}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] px-4 py-3 text-sm font-medium text-[#E0E0E0] transition-all hover:border-[#3A3A3A] hover:bg-[#222]"
+              >
+                <GoogleIcon />
+                Google
+              </button>
+              <button
+                type="button"
+                onClick={handleYandex}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] px-4 py-3 text-sm font-medium text-[#E0E0E0] transition-all hover:border-[#3A3A3A] hover:bg-[#222]"
+              >
+                <img src="/yandex-icon.png" alt="" className="h-5 w-5 object-contain" />
+                Яндекс
+              </button>
+            </div>
 
-          {tab === 'email' && (
-            <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-[#2A2A2A]" />
+              <span className="text-xs text-[#6B6B6B]">или через почту</span>
+              <div className="h-px flex-1 bg-[#2A2A2A]" />
+            </div>
+
+            <form onSubmit={handleEmailSubmit} className="space-y-4">
               {mode === 'register' && (
                 <div>
                   <label className="mb-1 block text-xs text-[#A0A0A0]">Имя</label>
@@ -179,28 +191,7 @@ export function AuthModal({ isOpen, onClose, mode = 'login' }: AuthModalProps) {
                 {emailBusy ? 'Проверка...' : mode === 'register' ? 'Зарегистрироваться' : 'Войти'}
               </button>
             </form>
-          )}
-
-          {tab === 'social' && (
-          <div className="mt-6 flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={handleGoogle}
-              className="flex items-center justify-center gap-3 rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] px-6 py-3 font-medium text-[#E0E0E0] transition-all hover:border-[#3A3A3A] hover:bg-[#222]"
-            >
-              <GoogleIcon />
-              Войти через Google
-            </button>
-            <button
-              type="button"
-              onClick={handleYandex}
-              className="flex items-center justify-center gap-3 rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] px-6 py-3 font-medium text-[#E0E0E0] transition-all hover:border-[#3A3A3A] hover:bg-[#222]"
-            >
-              <img src="/yandex-icon.png" alt="" className="h-5 w-5 object-contain" />
-              Войти через Яндекс
-            </button>
           </div>
-          )}
 
           <AnimatePresence>
             {hint && (

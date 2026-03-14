@@ -36,21 +36,32 @@ export function ProcessingStatus({
     status === 'separating' ||
     status === 'converting';
 
-  if (isProcessing) {
+  const showOverlay = isProcessing || (status === 'error' && error);
+
+  if (showOverlay) {
     return (
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="fixed inset-0 z-[88] flex items-center justify-center bg-[#0A0A0A]/55 backdrop-blur-[2px]"
+        className="fixed inset-0 z-[88] flex items-center justify-center bg-[#0A0A0A]/90 backdrop-blur-[4px]"
       >
         <div className="w-full max-w-md px-4">
-          <div className="rounded-2xl border border-[#2A2A2A] bg-[#111111]/95 p-5 shadow-2xl">
+          <div className="rounded-2xl border border-[#2A2A2A] bg-[#111111]/95 p-6 shadow-2xl">
             <div className="mb-3 flex items-center gap-3">
-              <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#8A2BE2] border-t-transparent" />
+              {isProcessing && (
+                <div className="h-7 w-7 shrink-0 animate-spin rounded-full border-2 border-[#8A2BE2] border-t-transparent" />
+              )}
+              {status === 'error' && (
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-500/30">
+                  <svg className="h-4 w-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </div>
+              )}
               <p className="text-sm font-medium text-[#E0E0E0]">{STATUS_LABELS[status] ?? status}</p>
             </div>
-            <ProgressInlineBar value={progress} />
-            {downloadProgress > 0 && downloadProgress < 100 && (
+            {isProcessing && <ProgressInlineBar value={progress} />}
+            {downloadProgress > 0 && downloadProgress < 100 && isProcessing && (
               <p className="mt-2 text-right text-[11px] text-[#7F7F7F]">
                 Скачивание модели: {downloadProgress.toFixed(0)}%
               </p>
